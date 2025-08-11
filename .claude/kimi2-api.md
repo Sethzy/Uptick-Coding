@@ -1,0 +1,3 @@
+export ANTHROPIC_AUTH_TOKEN=sk-sTx4Ytks8HGloAcDFDdJ6Uc9ISwwds2DJWXfk3ktZSKeYOG8
+
+export ANTHROPIC_BASE_URL=https://api.moonshot.ai/anthropic
