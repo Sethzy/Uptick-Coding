@@ -9,7 +9,7 @@ AIDEV-NOTE: Keep logic deterministic and lightweight for MLS.
 """
 
 from __future__ import annotations
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Any
 import re
 
 
@@ -54,12 +54,20 @@ def build_evidence_snippets(text: str, keywords: Sequence[str], *, window: int =
     return out
 
 
-def make_page_record(url: str, result: Dict, *, keywords: Sequence[str]) -> Dict:
-    md_raw = (result.get("markdown") or {}).get("raw_markdown") or ""
-    md_fit = (result.get("markdown") or {}).get("fit_markdown") or ""
-    cleaned_html = result.get("cleaned_html") or ""
-    links = result.get("links") or {}
-    metadata = result.get("metadata") or {}
+def make_page_record(url: str, result: Any, *, keywords: Sequence[str]) -> Dict:
+    """Normalize Crawl4AI result (object or dict) into a page record."""
+    # Access helpers that work for both objects and dicts
+    def _get(obj: Any, attr: str, default: Any = None) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(attr, default)
+        return getattr(obj, attr, default)
+
+    md_obj = _get(result, "markdown") or {}
+    md_raw = _get(md_obj, "raw_markdown", "") if md_obj else ""
+    md_fit = _get(md_obj, "fit_markdown", "") if md_obj else ""
+    cleaned_html = _get(result, "cleaned_html", "") or ""
+    links = _get(result, "links", {}) or {}
+    metadata = _get(result, "metadata", {}) or {}
 
     md_text = md_fit or md_raw or ""
     headings = extract_headings_simple(md_text)

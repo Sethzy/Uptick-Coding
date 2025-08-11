@@ -71,6 +71,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=int(os.getenv("LIMIT", "0")))
     parser.add_argument("--concurrency", type=int, default=int(os.getenv("CONCURRENCY", "1")))
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
     # Runtime config
@@ -93,8 +94,8 @@ def main() -> int:
         ok = fail = retry = 0
         failure_reasons: Dict[str, int] = {}
 
-        headers = build_headers(locale)
-        browser = BrowserConfig(headless=True, verbose=False, extra_http_headers=headers)
+        # Note: headers are handled internally by Crawl4AI/Playwright. Keep BrowserConfig minimal.
+        browser = BrowserConfig(headless=True, verbose=False)
 
         md = DefaultMarkdownGenerator(
             content_filter=PruningContentFilter(threshold=0.25, threshold_type="dynamic", min_word_threshold=10),
@@ -110,14 +111,15 @@ def main() -> int:
             },
         )
 
-        cp = load_checkpoint(args.checkpoint)
+        cp = load_checkpoint(args.checkpoint) if args.resume else {}
 
         with open_jsonl(args.output_jsonl) as fh:
             async with AsyncWebCrawler(config=browser) as crawler:
                 sem = asyncio.Semaphore(max(1, args.concurrency))
 
                 async def crawl_one(domain: str) -> None:
-                    if cp.get(domain) == -1:
+                    nonlocal ok, fail, retry, failure_reasons
+                    if args.resume and cp.get(domain) == -1:
                         return
                     start_ms = time.time()
                     mark_attempt(cp, domain)
@@ -169,6 +171,8 @@ def main() -> int:
                         cache_mode=CacheMode.BYPASS,
                         check_robots_txt=True,
                         session_id=stable_session_id(domain),
+                        simulate_user=True,
+                        magic=True,
                         excluded_tags=cfg.get("excluded_tags", ["nav", "footer", "script", "style"]),
                         exclude_external_links=cfg.get("exclude_external_links", True),
                         process_iframes=True,
@@ -199,14 +203,24 @@ def main() -> int:
                         return
 
                     pages: List[Dict[str, Any]] = []
-                    homepage = make_page_record(canonical_url, result.__dict__, keywords=cfg.get("keywords", []))
+                    homepage = make_page_record(canonical_url, result, keywords=cfg.get("keywords", []))
                     pages.append(homepage)
 
                     # Link discovery and selection from homepage
                     links_obj = getattr(result, "links", None) or {}
-                    internal_links = []
+                    internal_links: List[str] = []
+                    # Normalize links: handle strings or dicts with href/url
+                    def _norm_link(x: Any) -> str:
+                        if isinstance(x, str):
+                            return x
+                        if isinstance(x, dict):
+                            return x.get("url") or x.get("href") or ""
+                        return ""
                     if isinstance(links_obj, dict):
-                        internal_links = list(links_obj.get("internal", []))
+                        raw_internal = links_obj.get("internal", [])
+                        internal_links = [l for l in (_norm_link(x) for x in raw_internal) if l]
+                    elif isinstance(links_obj, list):
+                        internal_links = [l for l in (_norm_link(x) for x in links_obj) if l]
                     # Rank by priority buckets and select up to cap
                     buckets = cfg.get("link_priority_buckets", [])
                     ranked = rank_links_by_priority(internal_links, buckets)
@@ -217,7 +231,7 @@ def main() -> int:
                     for link in selected_links:
                         try:
                             r2 = await crawler.arun(url=link, config=run)
-                            page_rec = make_page_record(link, r2.__dict__, keywords=cfg.get("keywords", []))
+                            page_rec = make_page_record(link, r2, keywords=cfg.get("keywords", []))
                             pages.append(page_rec)
                         except Exception:
                             continue
@@ -250,6 +264,29 @@ def main() -> int:
                         deduped.append(p)
                     pages = deduped
 
+                    # Content guard: if no content extracted at all, treat as EMPTY_CONTENT
+                    has_any_content = any((p.get("markdown_fit") or p.get("markdown_raw") or p.get("cleaned_html")) for p in pages)
+                    if not has_any_content:
+                        reason = "EMPTY_CONTENT"
+                        rec = {
+                            "domain": domain,
+                            "canonical_url": canonical_url,
+                            "crawler_status": "FAIL",
+                            "crawler_reason": reason,
+                            "crawl_pages_visited": len(pages),
+                            "crawl_ts": datetime.now(timezone.utc).isoformat(),
+                            "pages": pages,
+                        }
+                        write_record(fh, rec)
+                        fail += 1
+                        failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+                        log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000))
+                        mark_success(cp, domain)
+                        save_checkpoint(args.checkpoint, cp)
+                        dcfg = cfg.get("per_domain_delay_seconds", {"min": 1.5, "max": 2.0, "jitter": 0.4})
+                        await asyncio.sleep(jitter_delay_seconds(dcfg.get("min", 1.5), dcfg.get("max", 2.0), dcfg.get("jitter", 0.4)))
+                        return
+
                     rec = {
                         "domain": domain,
                         "canonical_url": canonical_url,
@@ -262,7 +299,7 @@ def main() -> int:
                     write_record(fh, rec)
                     ok += 1
                     elapsed_ms = int((time.time() - start_ms) * 1000)
-                    log_progress(logger, domain, "OK", elapsed_ms=elapsed_ms, pages_visited=1)
+                    log_progress(logger, domain, "OK", elapsed_ms=elapsed_ms, pages_visited=len(pages))
 
                     mark_success(cp, domain)
                     save_checkpoint(args.checkpoint, cp)
