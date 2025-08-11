@@ -1,0 +1,50 @@
+https://tweakcn.com/
+
+:root {
+--background: #fcfcfc;
+--foreground: #000000;
+--card: #ffffff;
+--card-foreground: #000000;
+--popover: #fcfcfc;
+--popover-foreground: #000000;
+--primary: #000000;
+--primary-foreground: #ffffff;
+--secondary: #ebebeb;
+--secondary-foreground: #000000;
+--muted: #f5f5f5;
+--muted-foreground: #525252;
+--accent: #ebebeb;
+--accent-foreground: #000000;
+--destructive: #e54b4f;
+--destructive-foreground: #ffffff;
+--border: #e4e4e4;
+--input: #ebebeb;
+--ring: #000000;
+--chart-1: #ffae04;
+--chart-2: #2d62ef;
+--chart-3: #a4a4a4;
+--chart-4: #e4e4e4;
+--chart-5: #747474;
+--sidebar: #fcfcfc;
+--sidebar-foreground: #000000;
+--sidebar-primary: #000000;
+--sidebar-primary-foreground: #ffffff;
+--sidebar-accent: #ebebeb;
+--sidebar-accent-foreground: #000000;
+--sidebar-border: #ebebeb;
+--sidebar-ring: #000000;
+--font-sans: Geist, sans-serif;
+--font-serif: Georgia, serif;
+--font-mono: Geist Mono, monospace;
+--radius: 0.5rem;
+--shadow-2xs: 0px 1px 2px 0px hsl(0 0% 0% / 0.09);
+--shadow-xs: 0px 1px 2px 0px hsl(0 0% 0% / 0.09);
+--shadow-sm: 0px 1px 2px 0px hsl(0 0% 0% / 0.18), 0px 1px 2px -1px hsl(0 0% 0% / 0.18);
+--shadow: 0px 1px 2px 0px hsl(0 0% 0% / 0.18), 0px 1px 2px -1px hsl(0 0% 0% / 0.18);
+--shadow-md: 0px 1px 2px 0px hsl(0 0% 0% / 0.18), 0px 2px 4px -1px hsl(0 0% 0% / 0.18);
+--shadow-lg: 0px 1px 2px 0px hsl(0 0% 0% / 0.18), 0px 4px 6px -1px hsl(0 0% 0% / 0.18);
+--shadow-xl: 0px 1px 2px 0px hsl(0 0% 0% / 0.18), 0px 8px 10px -1px hsl(0 0% 0% / 0.18);
+--shadow-2xl: 0px 1px 2px 0px hsl(0 0% 0% / 0.45);
+--tracking-normal: 0em;
+--spacing: 0.25rem;
+}
