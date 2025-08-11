@@ -18,7 +18,7 @@ Size is explicitly out of scope for this phase. The output must be a content bun
 
 - Produce high-quality content bundles per domain suitable for downstream scoring.
 - Preserve evidence snippets and URLs for auditability.
-- Keep crawl targeted: homepage plus up to three high-signal pages per domain (MLS).
+- Keep crawl targeted: homepage plus up to four high-signal pages per domain (MLS).
 - Operate politely and reliably at large scale (~10k domains) using headless rendering to handle JS-heavy sites.
 
 ### User Stories
@@ -44,19 +44,22 @@ Size is explicitly out of scope for this phase. The output must be a content bun
 
    - Resolve reachability with fallbacks (HTTP→HTTPS, `www`↔root) before scoring.
 
-   <!-- AIDEV-NOTE: WAF-aware reachability tuning deferred beyond MLS to reduce complexity; use Crawl4AI defaults now -->
+   <!-- AIDEV-NOTE: WAF-aware reachability and session persistence added; see bullets below -->
 
-   WAF-aware reachability policy (Deferred for post-MLS):
+   WAF-aware reachability policy (Cloudflare/anti-bot):
 
-   - For MLS, use Crawl4AI/Playwright defaults without custom header/TLS fingerprinting; rely on politeness and retries.
-   - Later slice may add stable UA + coherent headers and TLS/HTTP impersonation if block rates justify.
+   - Stable randomized user-agent with coherent headers per domain/session.
+     - Choose a recent Chrome/Edge UA; keep it stable within a session; rotate only between sessions.
+     - Keep headers coherent: `sec-ch-ua*`, `Accept`, `Accept-Language`, `Accept-Encoding`, `Connection`, `Upgrade-Insecure-Requests`, and realistic `Referer` when applicable. Match platform (Windows/macOS) and locale consistently.
+   - TLS/HTTP impersonation and rendering alignment:
+     - Ensure the HTTP/TLS fingerprint matches modern Chrome. Use the crawler's headless rendering stack per requirements and align headers/UA accordingly.
 
    Status and bookkeeping:
 
    - For each row: `canonical_url`, `crawler_status` (OK|FAIL|RETRY|SKIPPED), `crawler_reason`.
    - Reasons include: `MALFORMED_DOMAIN`, `DNS_FAIL`, `TLS_FAIL`, `TIMEOUT`, `BLOCKED` (incl. WAF), `ROBOT_DISALLOW`, `SOCIAL_PROFILE`.
 
-2. Targeted crawl policy (Depth A: homepage + up to 3 pages)
+2. Targeted crawl policy (Depth A: homepage + up to 4 pages)
 
    - Always use headless browser rendering (Playwright via `crawl4ai`) to capture JS content.
    - Page selection priority (H): Services/Capabilities → Industries/Markets → About/Company → Certifications/Associations → Projects/Case Studies → Careers/Team/Numbers → Contact/Locations.
@@ -68,7 +71,7 @@ Size is explicitly out of scope for this phase. The output must be a content bun
 - in the MVP, we will adopt Strategy 1 — Priority-first BFS (deterministic):
 
   - Extract internal links on homepage; rank by priority buckets using URL patterns and anchor text (e.g., `/services`, `/capabilities`, `/industries`, `/about`, `/certifications`, `/projects|/case`, `/careers`, `/contact`).
-  - Select top unique pages across buckets until the 3-page cap is reached.
+  - Select top unique pages across buckets until the 4-page cap is reached.
   - Pros: Fast, predictable; Cons: Might miss content labeled unconventionally.
 
 if there is a problem we will troubelshoot.
@@ -117,7 +120,7 @@ if there is a problem we will troubelshoot.
 ### Technical Considerations
 
 - Rendering: Use Playwright headless (Chromium) always to handle SPA/JS sites per requirement 5C.
-- Page discovery: Extract and prioritize links using anchor text and URL patterns that match the priority list. Cap at 3 pages (excluding homepage) for MLS.
+- Page discovery: Extract and prioritize links using anchor text and URL patterns that match the priority list. Cap at 4 pages (excluding homepage) for MLS.
 - Language detection: Deferred beyond MLS to reduce complexity.
 - Duplicate detection: Hash normalized text to skip near-duplicates; prefer the first unique page per priority bucket.
 - Evidence selection: Use simple keyword matching and extract a centered 200–300 char snippet around the first match.
@@ -295,13 +298,13 @@ def get_optimized_crawler_config(self) -> CrawlerRunConfig:
 
 - Employee size estimation (explicitly excluded for this phase).
 - Off-domain enrichment (LinkedIn, Google, third-party APIs).
-- Deep crawling beyond 3 targeted pages per domain (MLS cap).
+- Deep crawling beyond 4 targeted pages per domain (MLS cap).
 - Classification and scoring (moved to `prd-scoring.md`).
 - Writing code for this PRD.
 
 ### Success Metrics
 
-- Coverage: ≥ 90% of reachable domains produce a content bundle including homepage + up to 3 targeted pages.
+- Coverage: ≥ 90% of reachable domains produce a content bundle including homepage + up to 4 targeted pages.
 - Content completeness: ≥ 95% of bundles include title, URL, language, and H1–H3 where present; at least one page per domain has ≥ 200 words.
 - Auditability: 100% of pages include URL and page-level metadata; evidence snippets are present when keywords detected.
 - Robustness: < 10% final `FAIL` after retries across the full dataset.

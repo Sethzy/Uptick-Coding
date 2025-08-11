@@ -1,0 +1,40 @@
+{
+  "keywords": [
+    "fire sprinkler",
+    "sprinkler",
+    "fire protection",
+    "fire alarm",
+    "alarm monitoring",
+    "suppression",
+    "inspection",
+    "testing",
+    "backflow",
+    "NFPA",
+    "UL listed",
+    "FM approved"
+  ],
+  "disallowed_paths": [
+    "/privacy",
+    "/terms",
+    "/cookie",
+    "/legal",
+    "/sso"
+  ],
+  "link_priority_buckets": [
+    { "name": "services", "patterns": ["/services", "/capabilities"] },
+    { "name": "industries", "patterns": ["/industries", "/markets"] },
+    { "name": "about", "patterns": ["/about", "/company"] },
+    { "name": "certifications", "patterns": ["/certifications", "/associations", "/affiliations"] },
+    { "name": "projects", "patterns": ["/projects", "/case"] },
+    { "name": "careers", "patterns": ["/careers", "/team", "/numbers"] },
+    { "name": "contact", "patterns": ["/contact", "/locations"] }
+  ],
+  "page_cap": 4,
+  "per_domain_delay_seconds": { "min": 1.5, "max": 2.0, "jitter": 0.4 },
+  "global_concurrency": 4,
+  "retries": 2,
+  "page_timeout_ms": 30000,
+  "allow_blog_if_keywords": true,
+  "exclude_external_links": true,
+  "excluded_tags": ["nav", "footer", "script", "style"]
+}
