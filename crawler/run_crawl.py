@@ -30,16 +30,19 @@ from .canonical import canonicalize_domain, is_robot_disallowed
 from .politeness import jitter_delay_seconds, backoff_sequence
 from .output_writer import open_jsonl, write_record
 from .extraction import make_page_record
+from .link_selection import rank_links_by_priority, select_top_links
+from .checkpoint import load_checkpoint, save_checkpoint, mark_attempt, mark_success
 
 import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, List, Any
 import time
 import os
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from crawl4ai.content_filter_strategy import PruningContentFilter
+import argparse
 
 
 def main() -> int:
@@ -59,20 +62,31 @@ def main() -> int:
 
     log_event(logger, "startup", details=runtime)
 
+    # CLI flags
+    parser = argparse.ArgumentParser(description="Targeted domain crawler (PRD aligned)")
+    parser.add_argument("--input-csv", default=os.getenv("INPUT_CSV", os.path.join(os.getcwd(), "uptick-csvs", "final_merged_hubspot_tam_data_resolved.csv")))
+    parser.add_argument("--output-jsonl", default=os.getenv("OUTPUT_JSONL", os.path.join(os.getcwd(), "crawl-output.jsonl")))
+    parser.add_argument("--checkpoint", default=os.getenv("CHECKPOINT", os.path.join(os.getcwd(), ".crawl-checkpoint.json")))
+    parser.add_argument("--from-index", type=int, default=int(os.getenv("FROM_INDEX", "0")))
+    parser.add_argument("--limit", type=int, default=int(os.getenv("LIMIT", "0")))
+    parser.add_argument("--concurrency", type=int, default=int(os.getenv("CONCURRENCY", "1")))
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
     # Runtime config
     cfg_path = os.path.join(os.getcwd(), "crawler", "config.json")
     with open(cfg_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
 
-    input_csv = os.getenv("INPUT_CSV", os.path.join(os.getcwd(), "uptick-csvs", "final_merged_hubspot_tam_data_resolved.csv"))
-    output_jsonl = os.getenv("OUTPUT_JSONL", os.path.join(os.getcwd(), "crawl-output.jsonl"))
-
     # Load domains
     try:
-        domains = load_domains_from_csv(input_csv)
+        all_domains = load_domains_from_csv(args.input_csv)
     except Exception as e:
         logger.info(f"Failed to load CSV: {e}")
         return 1
+
+    # Slice per flags
+    domains = all_domains[args.from_index: (args.from_index + args.limit) if args.limit > 0 else None]
 
     async def crawl_all() -> int:
         total = len(domains)
@@ -96,10 +110,18 @@ def main() -> int:
             },
         )
 
-        with open_jsonl(output_jsonl) as fh:
+        cp = load_checkpoint(args.checkpoint)
+
+        with open_jsonl(args.output_jsonl) as fh:
             async with AsyncWebCrawler(config=browser) as crawler:
-                for domain in domains:
+                sem = asyncio.Semaphore(max(1, args.concurrency))
+
+                async def crawl_one(domain: str) -> None:
+                    if cp.get(domain) == -1:
+                        return
                     start_ms = time.time()
+                    mark_attempt(cp, domain)
+                    save_checkpoint(args.checkpoint, cp)
 
                     # canonicalization
                     canonical_url = await canonicalize_domain(domain)
@@ -118,7 +140,9 @@ def main() -> int:
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000))
-                        continue
+                        mark_success(cp, domain)  # finalize state as processed
+                        save_checkpoint(args.checkpoint, cp)
+                        return
 
                     # robots preflight
                     if await is_robot_disallowed(canonical_url):
@@ -136,7 +160,9 @@ def main() -> int:
                         retry += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "SKIPPED", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000))
-                        continue
+                        mark_success(cp, domain)
+                        save_checkpoint(args.checkpoint, cp)
+                        return
 
                     run = CrawlerRunConfig(
                         markdown_generator=md,
@@ -170,26 +196,89 @@ def main() -> int:
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000))
-                        continue
+                        return
 
-                    page_record = make_page_record(canonical_url, result.__dict__, keywords=cfg.get("keywords", []))
+                    pages: List[Dict[str, Any]] = []
+                    homepage = make_page_record(canonical_url, result.__dict__, keywords=cfg.get("keywords", []))
+                    pages.append(homepage)
+
+                    # Link discovery and selection from homepage
+                    links_obj = getattr(result, "links", None) or {}
+                    internal_links = []
+                    if isinstance(links_obj, dict):
+                        internal_links = list(links_obj.get("internal", []))
+                    # Rank by priority buckets and select up to cap
+                    buckets = cfg.get("link_priority_buckets", [])
+                    ranked = rank_links_by_priority(internal_links, buckets)
+                    cap = int(cfg.get("page_cap", 4))
+                    selected_links = select_top_links(ranked, cap)
+
+                    # Crawl selected pages
+                    for link in selected_links:
+                        try:
+                            r2 = await crawler.arun(url=link, config=run)
+                            page_rec = make_page_record(link, r2.__dict__, keywords=cfg.get("keywords", []))
+                            pages.append(page_rec)
+                        except Exception:
+                            continue
+
+                    # Optional blog/news rule: keep at most one blog/news if it has keywords
+                    if cfg.get("allow_blog_if_keywords", True):
+                        kept: List[Dict[str, Any]] = []
+                        blog_kept = False
+                        for p in pages:
+                            path = (p.get("url") or "").lower()
+                            is_blog = "/blog" in path or "/news" in path
+                            if not is_blog:
+                                kept.append(p)
+                                continue
+                            if not blog_kept and p.get("detected_keywords"):
+                                kept.append(p)
+                                blog_kept = True
+                        pages = kept
+
+                    # De-duplicate by normalized text hash
+                    seen_hashes = set()
+                    deduped: List[Dict[str, Any]] = []
+                    import hashlib
+                    for p in pages:
+                        text = (p.get("markdown_fit") or p.get("markdown_raw") or "")
+                        h = hashlib.md5(text.encode("utf-8")).hexdigest()
+                        if h in seen_hashes:
+                            continue
+                        seen_hashes.add(h)
+                        deduped.append(p)
+                    pages = deduped
+
                     rec = {
                         "domain": domain,
                         "canonical_url": canonical_url,
                         "crawler_status": "OK" if getattr(result, "success", True) else "FAIL",
                         "crawler_reason": "" if getattr(result, "success", True) else (getattr(result, "error_message", None) or "UNKNOWN"),
-                        "crawl_pages_visited": 1,
+                        "crawl_pages_visited": len(pages),
                         "crawl_ts": datetime.now(timezone.utc).isoformat(),
-                        "pages": [page_record],
+                        "pages": pages,
                     }
                     write_record(fh, rec)
                     ok += 1
                     elapsed_ms = int((time.time() - start_ms) * 1000)
                     log_progress(logger, domain, "OK", elapsed_ms=elapsed_ms, pages_visited=1)
 
-                    # delay
+                    mark_success(cp, domain)
+                    save_checkpoint(args.checkpoint, cp)
+
+                    # delay per domain
                     dcfg = cfg.get("per_domain_delay_seconds", {"min": 1.5, "max": 2.0, "jitter": 0.4})
                     await asyncio.sleep(jitter_delay_seconds(dcfg.get("min", 1.5), dcfg.get("max", 2.0), dcfg.get("jitter", 0.4)))
+
+                async def worker(domain: str):
+                    async with sem:
+                        if args.dry_run:
+                            log_progress(logger, domain, "DRY_RUN")
+                            return
+                        await crawl_one(domain)
+
+                await asyncio.gather(*[worker(d) for d in domains])
 
         log_summary(logger, total=total, ok=ok, fail=fail, retry=retry, reasons=failure_reasons)
         return 0 if fail == 0 else 1

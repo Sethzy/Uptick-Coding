@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Sequence
 import re
 
 
-_HEADING_RE = re.compile(r"^\s{0,3}(?:#|\*\s|\d+\.)\s*(.+)$")
+_HEADING_RE = re.compile(r"^\s{0,3}(?:#{1,6}|\*\s|\d+\.)\s*(.+)$")
 
 
 def extract_headings_simple(markdown: str) -> List[str]:
