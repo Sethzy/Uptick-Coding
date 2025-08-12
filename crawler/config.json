@@ -33,8 +33,11 @@
   "per_domain_delay_seconds": { "min": 1.5, "max": 2.0, "jitter": 0.4 },
   "global_concurrency": 4,
   "retries": 2,
-  "page_timeout_ms": 30000,
+  "page_timeout_ms": 60000,
   "allow_blog_if_keywords": true,
   "exclude_external_links": true,
-  "excluded_tags": ["nav", "footer", "script", "style"]
+  "excluded_tags": ["nav", "footer", "script", "style"],
+  "respect_robots": true,
+  "robots_overrides": ["fpsweb.net"],
+  "content_filter_threshold": 0.2
 }

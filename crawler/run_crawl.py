@@ -98,7 +98,7 @@ def main() -> int:
         browser = BrowserConfig(headless=True, verbose=False)
 
         md = DefaultMarkdownGenerator(
-            content_filter=PruningContentFilter(threshold=0.25, threshold_type="dynamic", min_word_threshold=10),
+            content_filter=PruningContentFilter(threshold=cfg.get("content_filter_threshold", 0.25), threshold_type="dynamic", min_word_threshold=10),
             options={
                 "body_width": 0,
                 "ignore_emphasis": False,
@@ -146,8 +146,10 @@ def main() -> int:
                         save_checkpoint(args.checkpoint, cp)
                         return
 
-                    # robots preflight
-                    if await is_robot_disallowed(canonical_url):
+                    # robots preflight (allow override per domain)
+                    respect_robots = cfg.get("respect_robots", True)
+                    overrides = set(cfg.get("robots_overrides", []))
+                    if respect_robots and (domain not in overrides) and await is_robot_disallowed(canonical_url):
                         reason = "ROBOT_DISALLOW"
                         rec = {
                             "domain": domain,
