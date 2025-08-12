@@ -1,17 +1,13 @@
 {
   "keywords": [
-    "fire sprinkler",
-    "sprinkler",
-    "fire protection",
-    "fire alarm",
-    "alarm monitoring",
-    "suppression",
-    "inspection",
-    "testing",
-    "backflow",
     "NFPA",
-    "UL listed",
-    "FM approved"
+    "plumbing",
+    "hvac",
+    "mechanical",
+    "water",
+    "energy",
+    "electrical",
+    "security"
   ],
   "disallowed_paths": [
     "/privacy",
@@ -23,13 +19,9 @@
   "link_priority_buckets": [
     { "name": "services", "patterns": ["/services", "/capabilities"] },
     { "name": "industries", "patterns": ["/industries", "/markets"] },
-    { "name": "about", "patterns": ["/about", "/company"] },
-    { "name": "certifications", "patterns": ["/certifications", "/associations", "/affiliations"] },
-    { "name": "projects", "patterns": ["/projects", "/case"] },
-    { "name": "careers", "patterns": ["/careers", "/team", "/numbers"] },
-    { "name": "contact", "patterns": ["/contact", "/locations"] }
+    { "name": "about", "patterns": ["/about", "/company"] }
   ],
-  "page_cap": 4,
+  "page_cap": 5,
   "per_domain_delay_seconds": { "min": 1.5, "max": 2.0, "jitter": 0.4 },
   "global_concurrency": 4,
   "retries": 2,
@@ -39,5 +31,6 @@
   "excluded_tags": ["nav", "footer", "script", "style"],
   "respect_robots": true,
   "robots_overrides": ["fpsweb.net"],
-  "content_filter_threshold": 0.2
+  "content_filter_threshold": 0.2,
+  "sampling_ignore_robots": false
 }

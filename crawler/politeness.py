@@ -10,6 +10,7 @@ AIDEV-NOTE: Keep conservative defaults to avoid hammering sites.
 from __future__ import annotations
 import random
 from typing import Iterator
+import time
 
 
 def jitter_delay_seconds(base_min: float, base_max: float, jitter: float) -> float:
@@ -23,3 +24,11 @@ def backoff_sequence(retries: int, *, initial: float = 1.0, factor: float = 2.0)
     for _ in range(retries):
         yield delay
         delay *= factor
+
+
+def human_like_pause(base_ms: int = 2000, jitter_ratio: float = 0.2) -> float:
+    """Return seconds to sleep with small jitter (simulate human wait)."""
+    jitter = base_ms * jitter_ratio
+    import random
+    ms = base_ms + random.uniform(-jitter, jitter)
+    return max(0.0, ms / 1000.0)

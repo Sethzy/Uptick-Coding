@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Dict, Iterable, List, Sequence, Tuple
 from urllib.parse import urljoin, urlparse
 import re
+from bs4 import BeautifulSoup
 
 
 def is_internal_link(base: str, href: str) -> bool:
@@ -67,3 +68,19 @@ def select_top_links(ranked: Sequence[Tuple[int, str]], cap: int) -> List[str]:
         if link not in selected:
             selected.append(link)
     return selected
+
+
+def extract_anchors_from_html(base_url: str, html: str, disallowed_paths: Sequence[str]) -> List[str]:
+    """Extract internal anchor hrefs from HTML, resolve to absolute URLs, filter disallowed, dedupe."""
+    if not html:
+        return []
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return []
+    hrefs: List[str] = []
+    for a in soup.find_all("a"):
+        href = (a.get("href") or "").strip()
+        if href:
+            hrefs.append(href)
+    return filter_internal_links(base_url, hrefs, disallowed_paths)

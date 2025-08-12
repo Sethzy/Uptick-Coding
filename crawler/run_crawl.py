@@ -30,7 +30,7 @@ from .canonical import canonicalize_domain, is_robot_disallowed
 from .politeness import jitter_delay_seconds, backoff_sequence
 from .output_writer import open_jsonl, write_record
 from .extraction import make_page_record
-from .link_selection import rank_links_by_priority, select_top_links
+from .link_selection import rank_links_by_priority, select_top_links, extract_anchors_from_html
 from .checkpoint import load_checkpoint, save_checkpoint, mark_attempt, mark_success
 
 import asyncio
@@ -141,15 +141,16 @@ def main() -> int:
                         write_record(fh, rec)
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
-                        log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000))
+                        log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
                         mark_success(cp, domain)  # finalize state as processed
                         save_checkpoint(args.checkpoint, cp)
                         return
 
-                    # robots preflight (allow override per domain)
+                    # robots preflight with optional global sampling override
                     respect_robots = cfg.get("respect_robots", True)
+                    sampling_ignore_robots = cfg.get("sampling_ignore_robots", False)
                     overrides = set(cfg.get("robots_overrides", []))
-                    if respect_robots and (domain not in overrides) and await is_robot_disallowed(canonical_url):
+                    if (respect_robots and not sampling_ignore_robots) and (domain not in overrides) and await is_robot_disallowed(canonical_url):
                         reason = "ROBOT_DISALLOW"
                         rec = {
                             "domain": domain,
@@ -163,7 +164,7 @@ def main() -> int:
                         write_record(fh, rec)
                         retry += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
-                        log_progress(logger, domain, "SKIPPED", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000))
+                        log_progress(logger, domain, "SKIPPED", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
                         mark_success(cp, domain)
                         save_checkpoint(args.checkpoint, cp)
                         return
@@ -201,7 +202,7 @@ def main() -> int:
                         write_record(fh, rec)
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
-                        log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000))
+                        log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
                         return
 
                     pages: List[Dict[str, Any]] = []
@@ -211,31 +212,68 @@ def main() -> int:
                     # Link discovery and selection from homepage
                     links_obj = getattr(result, "links", None) or {}
                     internal_links: List[str] = []
-                    # Normalize links: handle strings or dicts with href/url
+                    # Normalize links: handle strings, dicts, or objects with .url/.href
                     def _norm_link(x: Any) -> str:
                         if isinstance(x, str):
                             return x
                         if isinstance(x, dict):
                             return x.get("url") or x.get("href") or ""
+                        # object with attributes
+                        href = getattr(x, "url", None) or getattr(x, "href", None)
+                        if isinstance(href, str):
+                            return href
                         return ""
+                    # Support dict style with 'internal'
                     if isinstance(links_obj, dict):
                         raw_internal = links_obj.get("internal", [])
                         internal_links = [l for l in (_norm_link(x) for x in raw_internal) if l]
-                    elif isinstance(links_obj, list):
-                        internal_links = [l for l in (_norm_link(x) for x in links_obj) if l]
+                    else:
+                        # object style with attribute 'internal'
+                        raw_internal = getattr(links_obj, "internal", None)
+                        if isinstance(raw_internal, list):
+                            internal_links = [l for l in (_norm_link(x) for x in raw_internal) if l]
+                        elif isinstance(links_obj, list):
+                            internal_links = [l for l in (_norm_link(x) for x in links_obj) if l]
+
+                    # Fallback: if no internal links, try extracting anchors from HTML
+                    if not internal_links:
+                        html = getattr(result, "cleaned_html", None) or ""
+                        internal_links = extract_anchors_from_html(canonical_url, html, cfg.get("disallowed_paths", []))
+
+                    # Log counts for debugging
+                    log_event(logger, "link_selection", details={
+                        "domain": domain,
+                        "internal_links_found": len(internal_links),
+                    })
                     # Rank by priority buckets and select up to cap
                     buckets = cfg.get("link_priority_buckets", [])
                     ranked = rank_links_by_priority(internal_links, buckets)
                     cap = int(cfg.get("page_cap", 4))
                     selected_links = select_top_links(ranked, cap)
+                    log_event(logger, "link_selection_ranked", details={
+                        "domain": domain,
+                        "selected_links_count": len(selected_links),
+                        "selected_links": selected_links,
+                    })
 
                     # Crawl selected pages
                     for link in selected_links:
                         try:
+                            log_event(logger, "subpage_attempt", details={"domain": domain, "url": link})
                             r2 = await crawler.arun(url=link, config=run)
                             page_rec = make_page_record(link, r2, keywords=cfg.get("keywords", []))
                             pages.append(page_rec)
-                        except Exception:
+                            log_event(logger, "subpage_ok", details={
+                                "domain": domain,
+                                "url": link,
+                                "text_length": page_rec.get("text_length", 0),
+                            })
+                        except Exception as e:
+                            log_event(logger, "subpage_error", details={
+                                "domain": domain,
+                                "url": link,
+                                "error": str(e),
+                            })
                             continue
 
                     # Optional blog/news rule: keep at most one blog/news if it has keywords
@@ -253,13 +291,14 @@ def main() -> int:
                                 blog_kept = True
                         pages = kept
 
-                    # De-duplicate by normalized text hash
+                    # De-duplicate by URL + normalized text to preserve distinct routes even if content overlaps
                     seen_hashes = set()
                     deduped: List[Dict[str, Any]] = []
                     import hashlib
                     for p in pages:
-                        text = (p.get("markdown_fit") or p.get("markdown_raw") or "")
-                        h = hashlib.md5(text.encode("utf-8")).hexdigest()
+                        url_key = p.get("url") or ""
+                        text = (p.get("markdown_fit") or "")
+                        h = hashlib.md5(f"{url_key}|{text}".encode("utf-8")).hexdigest()
                         if h in seen_hashes:
                             continue
                         seen_hashes.add(h)
@@ -267,7 +306,7 @@ def main() -> int:
                     pages = deduped
 
                     # Content guard: if no content extracted at all, treat as EMPTY_CONTENT
-                    has_any_content = any((p.get("markdown_fit") or p.get("markdown_raw") or p.get("cleaned_html")) for p in pages)
+                    has_any_content = any((p.get("markdown_fit")) for p in pages)
                     if not has_any_content:
                         reason = "EMPTY_CONTENT"
                         rec = {
@@ -282,7 +321,7 @@ def main() -> int:
                         write_record(fh, rec)
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
-                        log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000))
+                        log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=len(pages))
                         mark_success(cp, domain)
                         save_checkpoint(args.checkpoint, cp)
                         dcfg = cfg.get("per_domain_delay_seconds", {"min": 1.5, "max": 2.0, "jitter": 0.4})

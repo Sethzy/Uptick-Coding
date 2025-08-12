@@ -65,7 +65,7 @@ def make_page_record(url: str, result: Any, *, keywords: Sequence[str]) -> Dict:
     md_obj = _get(result, "markdown") or {}
     md_raw = _get(md_obj, "raw_markdown", "") if md_obj else ""
     md_fit = _get(md_obj, "fit_markdown", "") if md_obj else ""
-    cleaned_html = _get(result, "cleaned_html", "") or ""
+    # AIDEV-NOTE: Trimmed schema per decision — no cleaned_html or markdown_raw
     links = _get(result, "links", {}) or {}
     metadata = _get(result, "metadata", {}) or {}
 
@@ -83,8 +83,6 @@ def make_page_record(url: str, result: Any, *, keywords: Sequence[str]) -> Dict:
         "headings": headings,
         "detected_keywords": detected,
         "evidence_snippets": evidence,
-        "markdown_raw": md_raw,
         "markdown_fit": md_fit,
-        "cleaned_html": cleaned_html,
         "links": links,
     }

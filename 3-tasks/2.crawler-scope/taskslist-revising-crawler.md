@@ -16,7 +16,8 @@ AIDEV-NOTE: Parent tasks only; reply "Go" to expand into detailed sub-tasks per 
 
 ### Notes
 
-- Goal: Minimize payload for LLM scoring while retaining structure. Use `markdown_fit` only; fallback to `markdown_raw` if `markdown_fit` is empty.
+- Goal: Minimize payload for LLM scoring while retaining structure. Use `markdown_fit` only.
+- Do not add backwards-compatibility fallbacks unless explicitly requested.
 - Consider keeping `links` for transparency/debugging, but remove `cleaned_html` by default.
 - Provide a config flag to re-enable full artifacts for audits if needed.
 
@@ -24,7 +25,7 @@ AIDEV-NOTE: Parent tasks only; reply "Go" to expand into detailed sub-tasks per 
 
 - [ ] 1.0 Switch output to `markdown_fit` only (primary)
 - [ ] 2.0 Remove `markdown_raw` and `cleaned_html` from page records by default
-- [ ] 3.0 Add fallback: if `markdown_fit` empty, use `markdown_raw` (compat path)
+- [ ] 3.0 (Removed) Do not add fallback to `markdown_raw` unless explicitly requested
 - [ ] 4.0 Make inclusion of raw artifacts configurable (audit mode)
 - [ ] 5.0 Update unit tests and fixtures to the trimmed schema
 - [ ] 6.0 Update docs and usage notes to recommend `markdown_fit` for LLMs
