@@ -30,7 +30,12 @@ from .canonical import canonicalize_domain, is_robot_disallowed
 from .politeness import jitter_delay_seconds, backoff_sequence
 from .output_writer import open_jsonl, write_record
 from .extraction import make_page_record
-from .link_selection import rank_links_by_priority, select_top_links, extract_anchors_from_html
+from .link_selection import (
+    rank_links_by_priority,
+    select_top_links,
+    extract_anchors_from_html,
+    select_links_with_scoring,
+)
 from .checkpoint import load_checkpoint, save_checkpoint, mark_attempt, mark_success
 
 import asyncio
@@ -40,6 +45,13 @@ from typing import Dict, List, Any
 import time
 import os
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
+try:  # Prefer top-level import; fallback to adaptive module if needed
+    from crawl4ai import LinkPreviewConfig  # type: ignore
+except Exception:  # pragma: no cover
+    try:
+        from crawl4ai.adaptive_crawler import LinkPreviewConfig  # type: ignore
+    except Exception:  # pragma: no cover
+        LinkPreviewConfig = None  # type: ignore
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from crawl4ai.content_filter_strategy import PruningContentFilter
 import argparse
@@ -169,6 +181,29 @@ def main() -> int:
                         save_checkpoint(args.checkpoint, cp)
                         return
 
+                    # Link preview + scoring defaults (can be overridden via cfg)
+                    link_query = cfg.get("link_query", "fire protection sprinkler inspection testing alarm suppression")
+                    link_max = int(cfg.get("link_max_links", 30))
+                    link_ccy = int(cfg.get("link_concurrency", 5))
+                    link_timeout = int(cfg.get("link_timeout_seconds", 5))
+                    link_score_thresh = float(cfg.get("link_score_threshold", 0.0))
+
+                    lp = None
+                    if LinkPreviewConfig is not None:
+                        try:
+                            lp = LinkPreviewConfig(
+                                include_internal=True,
+                                include_external=False,
+                                max_links=link_max,
+                                concurrency=link_ccy,
+                                timeout=link_timeout,
+                                query=link_query,
+                                score_threshold=link_score_thresh,
+                                verbose=False,
+                            )
+                        except Exception:
+                            lp = None
+
                     run = CrawlerRunConfig(
                         markdown_generator=md,
                         cache_mode=CacheMode.BYPASS,
@@ -184,6 +219,8 @@ def main() -> int:
                         page_timeout=cfg.get("page_timeout_ms", 30000),
                         stream=False,
                         verbose=False,
+                        score_links=True,
+                        link_preview_config=lp,
                     )
 
                     try:
@@ -212,6 +249,7 @@ def main() -> int:
                     # Link discovery and selection from homepage
                     links_obj = getattr(result, "links", None) or {}
                     internal_links: List[str] = []
+                    internal_links_raw: List[Dict[str, Any]] = []
                     # Normalize links: handle strings, dicts, or objects with .url/.href
                     def _norm_link(x: Any) -> str:
                         if isinstance(x, str):
@@ -226,6 +264,9 @@ def main() -> int:
                     # Support dict style with 'internal'
                     if isinstance(links_obj, dict):
                         raw_internal = links_obj.get("internal", [])
+                        # Preserve raw dicts for scoring-aware selection
+                        if raw_internal and isinstance(raw_internal[0], dict):
+                            internal_links_raw = raw_internal  # type: ignore[assignment]
                         internal_links = [l for l in (_norm_link(x) for x in raw_internal) if l]
                     else:
                         # object style with attribute 'internal'
@@ -244,12 +285,33 @@ def main() -> int:
                     log_event(logger, "link_selection", details={
                         "domain": domain,
                         "internal_links_found": len(internal_links),
+                        "internal_links_raw": len(internal_links_raw),
                     })
-                    # Rank by priority buckets and select up to cap
+                    # Rank by score + patterns when raw dicts available; else fallback to buckets
                     buckets = cfg.get("link_priority_buckets", [])
-                    ranked = rank_links_by_priority(internal_links, buckets)
                     cap = int(cfg.get("page_cap", 4))
-                    selected_links = select_top_links(ranked, cap)
+
+                    selection_info_map: Dict[str, Any] = {}
+                    selected_links: List[str] = []
+                    if internal_links_raw:
+                        sel_threshold = float(cfg.get("selection_score_threshold", 0.3))
+                        selected_links, selection_info_map = select_links_with_scoring(
+                            internal_links_raw,
+                            base_url=canonical_url,
+                            buckets=buckets,
+                            cap=cap,
+                            score_threshold=sel_threshold,
+                        )
+                    else:
+                        ranked = rank_links_by_priority(internal_links, buckets)
+                        selected_links = select_top_links(ranked, cap)
+                    # Exclude homepage from selection and enforce cap again
+                    def _norm(u: str) -> str:
+                        return (u or "").rstrip('/')
+                    selected_links = [u for u in selected_links if _norm(u) != _norm(canonical_url)]
+                    if len(selected_links) > cap:
+                        selected_links = selected_links[:cap]
+
                     log_event(logger, "link_selection_ranked", details={
                         "domain": domain,
                         "selected_links_count": len(selected_links),
@@ -262,6 +324,15 @@ def main() -> int:
                             log_event(logger, "subpage_attempt", details={"domain": domain, "url": link})
                             r2 = await crawler.arun(url=link, config=run)
                             page_rec = make_page_record(link, r2, keywords=cfg.get("keywords", []))
+                            # Attach selection diagnostics if available
+                            if link in selection_info_map:
+                                info = selection_info_map[link]
+                                page_rec["bucket"] = info.get("bucket")
+                                page_rec["intrinsic_score"] = info.get("intrinsic_score")
+                                page_rec["contextual_score"] = info.get("contextual_score")
+                                page_rec["total_score"] = info.get("final_score")
+                                page_rec["selection_reason"] = info.get("selection_reason")
+                                page_rec["matched_slugs"] = info.get("matched_slugs")
                             pages.append(page_rec)
                             log_event(logger, "subpage_ok", details={
                                 "domain": domain,
@@ -276,7 +347,7 @@ def main() -> int:
                             })
                             continue
 
-                    # Optional blog/news rule: keep at most one blog/news if it has keywords
+                    # Blog/news rule: at most one if strong signals (contextual ≥ threshold and/or whitelisted slug)
                     if cfg.get("allow_blog_if_keywords", True):
                         kept: List[Dict[str, Any]] = []
                         blog_kept = False
@@ -286,7 +357,11 @@ def main() -> int:
                             if not is_blog:
                                 kept.append(p)
                                 continue
-                            if not blog_kept and p.get("detected_keywords"):
+                            # strong signals: contextual score or matched slugs
+                            info = selection_info_map.get(p.get("url", ""), {})
+                            contextual_ok = isinstance(info.get("contextual_score"), (int, float)) and float(info.get("contextual_score")) >= float(cfg.get("selection_score_threshold", 0.3))
+                            has_slug = bool(info.get("matched_slugs"))
+                            if not blog_kept and (contextual_ok or has_slug or p.get("detected_keywords")):
                                 kept.append(p)
                                 blog_kept = True
                         pages = kept
