@@ -76,7 +76,7 @@ def main() -> int:
     # CLI flags
     parser = argparse.ArgumentParser(description="Targeted domain crawler (PRD aligned)")
     parser.add_argument("--input-csv", default=os.getenv("INPUT_CSV", os.path.join(os.getcwd(), "uptick-csvs", "final_merged_hubspot_tam_data_resolved.csv")))
-    parser.add_argument("--output-jsonl", default=os.getenv("OUTPUT_JSONL", os.path.join(os.getcwd(), "crawl-output.jsonl")))
+    parser.add_argument("--output-jsonl", default=os.getenv("OUTPUT_JSONL", os.path.join(os.getcwd(), "raw-output.jsonl")))
     parser.add_argument("--checkpoint", default=os.getenv("CHECKPOINT", os.path.join(os.getcwd(), ".crawl-checkpoint.json")))
     parser.add_argument("--from-index", type=int, default=int(os.getenv("FROM_INDEX", "0")))
     parser.add_argument("--limit", type=int, default=int(os.getenv("LIMIT", "0")))
@@ -136,7 +136,22 @@ def main() -> int:
 
         cp = load_checkpoint(args.checkpoint) if args.resume else {}
 
-        with open_jsonl(args.output_jsonl) as fh:
+        # AIDEV-NOTE: Also emit a filtered JSONL for LLM consumption next to raw-output
+        run_dir = os.path.dirname(os.path.abspath(args.output_jsonl))
+        llm_input_path = os.path.join(run_dir, "llm-input.jsonl")
+
+        # Helper to produce the minimal LLM input record
+        def to_llm_input(domain: str, pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+            out_pages: List[Dict[str, Any]] = []
+            for idx, p in enumerate(pages):
+                url_val = p.get("url") or ""
+                if idx == 0:
+                    out_pages.append({"url": url_val, "markdown_scoped": p.get("markdown_scoped") or ""})
+                else:
+                    out_pages.append({"url": url_val, "markdown_fit": p.get("markdown_fit") or ""})
+            return {"domain": domain, "pages": out_pages}
+
+        with open_jsonl(args.output_jsonl) as fh, open_jsonl(llm_input_path) as fh_llm:
             async with AsyncWebCrawler(config=browser) as crawler:
                 sem = asyncio.Semaphore(max(1, args.concurrency))
 
@@ -169,6 +184,7 @@ def main() -> int:
                             "pages": [],
                         }
                         write_record(fh, rec)
+                        write_record(fh_llm, to_llm_input(domain, rec.get("pages", []) or []))
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
@@ -202,6 +218,7 @@ def main() -> int:
                             "pages": [],
                         }
                         write_record(fh, rec)
+                        write_record(fh_llm, to_llm_input(domain, rec.get("pages", []) or []))
                         retry += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "SKIPPED", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
@@ -270,6 +287,7 @@ def main() -> int:
                             "pages": [],
                         }
                         write_record(fh, rec)
+                        write_record(fh_llm, to_llm_input(domain, rec.get("pages", []) or []))
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
@@ -468,6 +486,7 @@ def main() -> int:
                             "pages": pages,
                         }
                         write_record(fh, rec)
+                        write_record(fh_llm, to_llm_input(domain, rec.get("pages", []) or []))
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=len(pages))
@@ -487,6 +506,7 @@ def main() -> int:
                         "pages": pages,
                     }
                     write_record(fh, rec)
+                    write_record(fh_llm, to_llm_input(domain, rec.get("pages", []) or []))
                     ok += 1
                     elapsed_ms = int((time.time() - start_ms) * 1000)
                     log_progress(logger, domain, "OK", elapsed_ms=elapsed_ms, pages_visited=len(pages))

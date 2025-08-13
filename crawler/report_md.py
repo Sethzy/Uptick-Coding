@@ -111,10 +111,10 @@ def _per_domain_details(records_by_domain: Dict[str, Dict], ordered_domains: Seq
 def generate_markdown_report(output_jsonl_path: str, input_csv_path: str) -> str:
     """
     Render a Markdown report from the JSONL domain records and write it next to
-    the JSONL file as `output.md`. Returns the path to the written Markdown.
+    the JSONL file as `raw-output.md`. Returns the path to the written Markdown.
     """
     run_dir = os.path.dirname(os.path.abspath(output_jsonl_path))
-    md_path = os.path.join(run_dir, "output.md")
+    md_path = os.path.join(run_dir, "raw-output.md")
 
     # Load all records keyed by domain
     records_by_domain: Dict[str, Dict] = {}
@@ -150,7 +150,7 @@ def generate_markdown_report(output_jsonl_path: str, input_csv_path: str) -> str
     lines: List[str] = []
     lines.append("<!--")
     lines.append("/**")
-    lines.append(" * Purpose: Human-readable summary of batch output.jsonl")
+    lines.append(" * Purpose: Human-readable summary of batch raw-output.jsonl")
     lines.append(" * Description: Summarizes domain crawl outcomes and key page data for quick verification.")
     lines.append(" * Key Sections: Overview table; Per-domain details")
     lines.append(" */")

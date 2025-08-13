@@ -195,12 +195,21 @@
       const state = { data: [], currentIndex: 0 };
 
       async function loadData() {
-        const res = await fetch("./fpsweb-pages.json");
-        if (!res.ok) throw new Error("Failed to load fpsweb-pages.json");
-        const data = await res.json();
-        if (!Array.isArray(data))
-          throw new Error("JSON root should be an array");
-        state.data = data;
+        // AIDEV-NOTE: Supports JSONL domain records -> flattens into pages[] for previewer
+        const res = await fetch("./test-run/raw-output.jsonl");
+        if (!res.ok) throw new Error("Failed to load raw-output.jsonl");
+        const text = await res.text();
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        const records = lines.map((line) => JSON.parse(line));
+        const pages = records.flatMap((rec) =>
+          Array.isArray(rec.pages) ? rec.pages : []
+        );
+        if (!Array.isArray(pages) || pages.length === 0)
+          throw new Error("No pages found in raw-output.jsonl");
+        state.data = pages;
       }
 
       function el(id) {

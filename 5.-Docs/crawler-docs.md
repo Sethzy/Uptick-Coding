@@ -12,7 +12,11 @@
 
 ## Feature Overview
 
-The Targeted Domain Crawler discovers and extracts structured content from company websites with a focus on service-related pages (e.g., fire protection). It prioritizes high-value internal links using deterministic rules, normalizes page content, and emits machine-readable JSONL plus a human-friendly Markdown summary.
+The Targeted Domain Crawler discovers and extracts structured content from company websites with a focus on service-related pages (e.g., fire protection). It prioritizes high-value internal links using deterministic rules, normalizes page content, and emits:
+
+- A full, machine-readable JSONL (`raw-output.jsonl`)
+- A filtered LLM-ready JSONL (`llm-input.jsonl`)
+- A human-friendly Markdown summary (`raw-output.md`)
 
 - **Business value**: Rapid enrichment of target accounts with verified website content and key signals (headings, keywords, evidence). Supports batch processing, resumability, politeness, and robots respect.
 - **Problems solved**:
@@ -32,8 +36,9 @@ flowchart LR
   Links & LinksRaw --> Select[select_links_simple]
   Select --> SubpageCrawl[AsyncWebCrawler subpages]
   SubpageCrawl --> Extract[extraction.make_page_record]
-  Extract --> JSONL[output_writer.write_record]
-  JSONL --> Report[report_md.generate_markdown_report]
+  Extract --> RawJSONL[raw-output.jsonl]
+  Extract --> LLMJSONL[llm-input.jsonl]
+  RawJSONL --> Report[raw-output.md]
 ```
 
 ## Architecture and Application Structure
@@ -48,7 +53,7 @@ flowchart LR
   - `output_writer.py`: atomic JSONL writer utilities
   - `politeness.py`: delays, jitter, and backoff sequences
   - `reachability.py`: CSV domain loading and normalization
-  - `report_md.py`: Markdown report generator for run outputs
+  - `report_md.py`: Markdown report generator for run outputs (`raw-output.md`)
   - `session.py`: stable session IDs and browser headers
   - `config.json`: runtime config for selection, limits, and behavior
 - Tests: `crawler/tests/` covering selection, extraction, IO, reachability
@@ -66,7 +71,7 @@ High-level orchestration:
   - Extracts DOM anchors via `link_selection.extract_anchors_from_html` with internal-only filtering and disallowed path drops.
   - Deterministic selection via `select_links_simple` (current default), with optional intrinsic/contextual scoring paths available in `link_selection.py` if enabled later.
 - **Page extraction**: `extraction.make_page_record` standardizes title, language, text length, headings, detected keywords, evidence snippets, markdown, and links.
-- **Output**: `output_writer.open_jsonl` and `write_record` emit atomic JSONL; `report_md.generate_markdown_report` writes `output.md` next to the JSONL.
+- **Output**: `output_writer.open_jsonl` and `write_record` emit atomic JSONL; `run_crawl.py` also emits a filtered `llm-input.jsonl`. `report_md.generate_markdown_report` writes `raw-output.md` next to the JSONL.
 - **Politeness**: `politeness.jitter_delay_seconds` and `backoff_sequence` provide conservative pacing between domains.
 - **Logging**: JSON-structured progress, events, and summaries in `logging.py`.
 
@@ -88,7 +93,7 @@ python crawler/run_crawl.py \
 ```
 
 - **--input-csv**: CSV with a domain column (default `uptick-csvs/final_merged_hubspot_tam_data_resolved.csv`).
-- **--output-jsonl**: Destination for results (default `./crawl-output.jsonl`).
+- **--output-jsonl**: Destination for the full results (default `./raw-output.jsonl`). The filtered `llm-input.jsonl` and `raw-output.md` are written next to it.
 - **--checkpoint**: File path for resumable progress (default `./.crawl-checkpoint.json`).
 - **--from-index / --limit**: Slice input for batching.
 - **--concurrency**: Number of concurrent domains.
@@ -122,8 +127,25 @@ AIDEV-NOTE: Code recognizes `excluded_tags_for_content_only` as an internal defa
 
 ## Outputs
 
-- JSONL: one record per domain, including `domain`, `canonical_url`, `crawler_status`, `crawler_reason`, `crawl_pages_visited`, `crawl_ts`, and `pages` (array of normalized page records).
-- Markdown report: `output.md` rendered next to the JSONL with an overview table and per-domain details.
+- Full JSONL (`raw-output.jsonl`): one record per domain, including `domain`, `canonical_url`, `crawler_status`, `crawler_reason`, `crawl_pages_visited`, `crawl_ts`, and `pages` (array of normalized page records).
+- Markdown report (`raw-output.md`): summary rendered next to the JSONL with an overview table and per-domain details.
+- LLM input JSONL (`llm-input.jsonl`): filtered per-domain records designed for LLM prompts.
+
+  - Schema per line: `{ "domain": string, "pages": Array<Page> }`
+  - Page selection/content rules:
+    - Page 0 (homepage): `{ url, markdown_scoped }`
+    - Subsequent pages: `{ url, markdown_fit }`
+  - Example:
+
+  ```json
+  {
+    "domain": "example.com",
+    "pages": [
+      { "url": "https://example.com", "markdown_scoped": "..." },
+      { "url": "https://example.com/services", "markdown_fit": "..." }
+    ]
+  }
+  ```
 
 Example JSONL record (truncated):
 
@@ -179,7 +201,7 @@ Run a batch crawl:
 ```bash
 python crawler/run_crawl.py \
   --input-csv /absolute/path/to/uptick-csvs/final_merged_hubspot_tam_data_resolved.csv \
-  --output-jsonl /absolute/path/to/crawl-runs/sample/output.jsonl \
+  --output-jsonl /absolute/path/to/crawl-runs/sample/raw-output.jsonl \
   --checkpoint /absolute/path/to/.crawl-checkpoint.json \
   --from-index 0 --limit 100 --concurrency 4
 ```
