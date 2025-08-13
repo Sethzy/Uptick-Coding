@@ -187,6 +187,31 @@ def html2text(html: str, *, include_urls: bool = False, url: Optional[str] = Non
     return clean_text(cleaned)
 
 
+def strip_links_from_markdown(text: str) -> str:
+    """
+    Remove links from markdown while preserving visible anchor text.
+
+    AIDEV-NOTE: Applied only to `markdown_fit` to reduce noise for LLMs.
+    - [text](url) -> text
+    - ![alt](src) -> alt
+    - <https://...> -> ''
+    - bare https?://... -> ''
+    - Drop trailing '## References' section if present
+    """
+    if not text:
+        return ""
+    # Inline images then links
+    s = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", r"\1", text)
+    s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1", s)
+    # Autolinks <http://...>
+    s = re.sub(r"<https?://[^>]+>", "", s)
+    # Bare URLs
+    s = re.sub(r"https?://\S+", "", s)
+    # Drop References section (if generator added citations-like block)
+    s = re.sub(r"\n\n## References[\s\S]*$", "", s, flags=re.MULTILINE)
+    return s
+
+
 def scoped_markdown_from_html(html: str, selectors: Sequence[str], base_url: Optional[str] = None) -> str:
     """
     Return markdown-like text extracted from the first DOM node matching any CSS selector.
@@ -235,6 +260,9 @@ def make_page_record(
     md_obj = _get(result, "markdown") or {}
     md_raw = _get(md_obj, "raw_markdown", "") if md_obj else ""
     md_fit = _get(md_obj, "fit_markdown", "") if md_obj else ""
+    if md_fit:
+        # AIDEV-NOTE: Remove links from fit markdown only (keep raw for provenance)
+        md_fit = strip_links_from_markdown(md_fit)
     # AIDEV-NOTE: Trimmed schema per decision — no cleaned_html or markdown_raw
     links = _get(result, "links", {}) or {}
     metadata = _get(result, "metadata", {}) or {}

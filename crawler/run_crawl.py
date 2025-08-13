@@ -110,9 +110,18 @@ def main() -> int:
         # Note: headers are handled internally by Crawl4AI/Playwright. Keep BrowserConfig minimal.
         browser = BrowserConfig(headless=True, verbose=False)
 
-        # AIDEV-NOTE: Disable pruning; rely on DOM scoping instead
+        # AIDEV-NOTE: Enable pruning to populate `fit_markdown`. Threshold is env-tunable via CRAWL4AI_FILTER_THRESHOLD.
+        try:
+            cf_threshold = float(os.getenv("CRAWL4AI_FILTER_THRESHOLD", "0.25"))
+        except Exception:
+            cf_threshold = 0.25
+        content_filter = PruningContentFilter(
+            threshold=cf_threshold,
+            threshold_type="dynamic",
+            min_word_threshold=10,
+        )
         md = DefaultMarkdownGenerator(
-            content_filter=None,
+            content_filter=content_filter,
             options={
                 "body_width": 0,
                 "ignore_emphasis": False,
