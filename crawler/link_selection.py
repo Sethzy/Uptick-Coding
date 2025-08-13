@@ -14,7 +14,7 @@ AIDEV-NOTE: Deterministic sorting is critical. Tie-breakers are bucket order
 
 from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Sequence, Tuple, Optional
-from urllib.parse import urljoin, urlparse, urlunparse, parse_qsl, urlencode
+from urllib.parse import urljoin, urlparse
 import re
 
 try:
@@ -237,19 +237,12 @@ def select_links_simple(
             if not is_internal_link(base_url, href):
                 continue
             u = urlparse(urljoin(base_url, href))
-            # Normalize: drop fragment and tracking params
-            if u.fragment:
-                u = u._replace(fragment="")
-            if u.query:
-                params = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True)
-                          if not (k.lower().startswith("utm_") or k.lower() in {"gclid", "fbclid", "mc_cid", "mc_eid"})]
-                u = u._replace(query=urlencode(params))
             path = u.path or "/"
             if any(path.startswith(p) for p in disallowed_paths):
                 continue
         except Exception:
             continue
-        abs_href = urlunparse(u)
+        abs_href = u.geturl()
         if _norm(abs_href) == homepage:
             continue
         if abs_href in seen:
@@ -306,36 +299,16 @@ def filter_internal_links(base: str, hrefs: Iterable[str], disallowed_paths: Seq
         if not is_internal_link(base, h):
             continue
         u = urlparse(urljoin(base, h))
-        # Drop fragments so section anchors don't masquerade as unique pages
-        if u.fragment:
-            u = u._replace(fragment="")
-        # Remove common tracking parameters from query string
-        if u.query:
-            params = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True)
-                      if not (k.lower().startswith("utm_") or k.lower() in {"gclid", "fbclid", "mc_cid", "mc_eid"})]
-            u = u._replace(query=urlencode(params))
-        normalized = urlunparse(u)
         path = u.path or "/"
         if any(path.startswith(p) for p in disallowed_paths):
             continue
-        # Exclude base homepage itself
-        try:
-            b = urlparse(base)
-            base_norm = urlunparse(b._replace(params="", query="", fragment=""))
-            cand_norm = urlunparse(u._replace(params="", query="", fragment=""))
-            # Normalize trailing slashes for comparison
-            if (urlparse(base_norm).path or "/").rstrip("/") == (urlparse(cand_norm).path or "/").rstrip("/"):
-                continue
-        except Exception:
-            pass
-        out.append(normalized)
+        out.append(u.geturl())
     seen = set()
     uniq: List[str] = []
     for u in out:
-        if u in seen:
-            continue
-        seen.add(u)
-        uniq.append(u)
+        if u not in seen:
+            seen.add(u)
+            uniq.append(u)
     return uniq
 
 def extract_anchors_from_html(base_url: str, html: str, disallowed_paths: Sequence[str]) -> List[str]:
@@ -420,19 +393,12 @@ def select_links_with_scoring(
             if not is_internal_link(base_url, href):
                 continue
             u = urlparse(urljoin(base_url, href))
-            # Normalize: drop fragment and tracking params
-            if u.fragment:
-                u = u._replace(fragment="")
-            if u.query:
-                params = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True)
-                          if not (k.lower().startswith("utm_") or k.lower() in {"gclid", "fbclid", "mc_cid", "mc_eid"})]
-                u = u._replace(query=urlencode(params))
             path = u.path or "/"
             if any(path.startswith(p) for p in disallowed_paths):
                 continue
         except Exception:
             continue
-        abs_href = urlunparse(u)
+        abs_href = u.geturl()
         if _norm(abs_href) == homepage:
             continue
         if abs_href in seen:

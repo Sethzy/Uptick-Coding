@@ -74,13 +74,8 @@ def make_page_record(url: str, result: Any, *, keywords: Sequence[str]) -> Dict:
     detected = detect_keywords(md_text, keywords)
     evidence = build_evidence_snippets(md_text, detected)
 
-    final_url = _get(result, "url", url)
-    status_code = _get(result, "status_code", None)
-
     return {
-        # AIDEV-NOTE: Store both requested and final URLs to diagnose redirects
-        "requested_url": url,
-        "url": final_url,
+        "url": url,
         "title": metadata.get("title"),
         "language": metadata.get("language"),
         "render_mode": "browser",
@@ -90,5 +85,4 @@ def make_page_record(url: str, result: Any, *, keywords: Sequence[str]) -> Dict:
         "evidence_snippets": evidence,
         "markdown_fit": md_fit,
         "links": links,
-        "status_code": status_code,
     }
