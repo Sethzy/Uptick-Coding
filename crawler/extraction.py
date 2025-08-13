@@ -212,6 +212,31 @@ def strip_links_from_markdown(text: str) -> str:
     return s
 
 
+def strip_links_and_images_scoped(text: str) -> str:
+    """
+    Remove images and link remnants from scoped markdown.
+
+    AIDEV-NOTE: Scoped content aims to be clean text-only for LLMs.
+    - Drop custom image tokens like: [Image: label (src)]
+    - Remove inline [Image: ...] occurrences
+    - Remove markdown-style links and bare/angle URLs if present
+    """
+    if not text:
+        return ""
+    s = text
+    # Remove whole lines that are only image tokens
+    s = re.sub(r"^\s*\[Image:[^\]]*\]\s*$", "", s, flags=re.MULTILINE)
+    # Remove inline image tokens
+    s = re.sub(r"\[Image:[^\]]*\]", "", s)
+    # Remove markdown images/links and bare URLs
+    s = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", r"\1", s)
+    s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1", s)
+    s = re.sub(r"<https?://[^>]+>", "", s)
+    s = re.sub(r"https?://\S+", "", s)
+    # Collapse any created multiple blank lines
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
 def scoped_markdown_from_html(html: str, selectors: Sequence[str], base_url: Optional[str] = None) -> str:
     """
     Return markdown-like text extracted from the first DOM node matching any CSS selector.
@@ -268,6 +293,9 @@ def make_page_record(
     metadata = _get(result, "metadata", {}) or {}
 
     markdown_scoped = scoped_markdown or ""
+    if markdown_scoped:
+        # AIDEV-NOTE: Remove links and images from scoped markdown for minimal noise
+        markdown_scoped = strip_links_and_images_scoped(markdown_scoped)
     markdown_raw = md_raw or ""
     # Derive signals from scoped content only
     signal_text = markdown_scoped
