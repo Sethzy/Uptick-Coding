@@ -22,10 +22,10 @@ def _safe_title(s: Any) -> str:
     return s
 
 
-def _content_sample(markdown_fit: str, *, max_chars: int = 360) -> str:
-    if not markdown_fit:
+def _content_sample(text: str, *, max_chars: int = 360) -> str:
+    if not text:
         return ""
-    s = markdown_fit.strip().replace("\n", "\n")
+    s = text.strip().replace("\n", "\n")
     if len(s) <= max_chars:
         return s
     return s[:max_chars].rstrip() + "…"
@@ -90,7 +90,8 @@ def _per_domain_details(records_by_domain: Dict[str, Dict], ordered_domains: Seq
             title = _safe_title(p.get("title"))
             text_len = int(p.get("text_length", 0) or 0)
             headings = p.get("headings") or []
-            md_fit = p.get("markdown_fit") or ""
+            md_scoped = p.get("markdown_scoped") or ""
+            md_raw = p.get("markdown_raw") or ""
             out.append(f"  - Page {idx}: {url}")
             out.append(f"    - title: {title}")
             out.append(f"    - text_length: {text_len}")
@@ -98,9 +99,12 @@ def _per_domain_details(records_by_domain: Dict[str, Dict], ordered_domains: Seq
                 joined = ", ".join(str(h) for h in headings if isinstance(h, str) and h.strip())
                 if joined:
                     out.append(f"    - headings: {joined}")
-            sample = _content_sample(md_fit)
-            if sample:
-                out.append(f"    - content_sample: {sample}")
+            scoped_sample = _content_sample(md_scoped)
+            raw_sample = _content_sample(md_raw)
+            if scoped_sample:
+                out.append(f"    - content_sample_scoped: {scoped_sample}")
+            if raw_sample:
+                out.append(f"    - content_sample_raw: {raw_sample}")
     return out
 
 

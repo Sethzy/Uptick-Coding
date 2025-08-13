@@ -110,8 +110,9 @@ def main() -> int:
         # Note: headers are handled internally by Crawl4AI/Playwright. Keep BrowserConfig minimal.
         browser = BrowserConfig(headless=True, verbose=False)
 
+        # AIDEV-NOTE: Disable pruning; rely on DOM scoping instead
         md = DefaultMarkdownGenerator(
-            content_filter=PruningContentFilter(threshold=cfg.get("content_filter_threshold", 0.25), threshold_type="dynamic", min_word_threshold=10),
+            content_filter=None,
             options={
                 "body_width": 0,
                 "ignore_emphasis": False,
@@ -224,6 +225,7 @@ def main() -> int:
 
                     check_robots_txt = bool(respect_robots and not sampling_ignore_robots)
 
+                    # Honor excluded_tags from config (fix key)
                     run = CrawlerRunConfig(
                         markdown_generator=md,
                         cache_mode=CacheMode.BYPASS,
@@ -231,8 +233,7 @@ def main() -> int:
                         session_id=stable_session_id(domain),
                         simulate_user=True,
                         magic=True,
-                         # Do not exclude nav/footer for link discovery; rely on content filter for markdown noise
-                         excluded_tags=cfg.get("excluded_tags_for_content_only", ["script", "style"]),
+                         excluded_tags=cfg.get("excluded_tags", ["nav", "footer", "script", "style"]),
                          # Allow external links at crawl time to capture cross-subdomain (apex/www) as internal later
                          exclude_external_links=cfg.get("exclude_external_links", False),
                         process_iframes=True,
@@ -266,7 +267,25 @@ def main() -> int:
                         return
 
                     pages: List[Dict[str, Any]] = []
-                    homepage = make_page_record(canonical_url, result, keywords=cfg.get("keywords", []))
+                    emit_links_flag = bool(cfg.get("emit_links", False))
+                    # Compute DOM-scoped markdown for homepage
+                    content_selectors = cfg.get("content_selectors", [
+                        "main", "article", "#content", ".content", ".main", ".main-content", ".container .content", "#primary"
+                    ])
+                    cleaned_html = getattr(result, "cleaned_html", "") or ""
+                    scoped_md = ""
+                    try:
+                        from .extraction import scoped_markdown_from_html  # local import to avoid circulars
+                        scoped_md = scoped_markdown_from_html(cleaned_html, content_selectors, base_url=canonical_url)
+                    except Exception:
+                        scoped_md = ""
+                    homepage = make_page_record(
+                        canonical_url,
+                        result,
+                        keywords=cfg.get("keywords", []),
+                        scoped_markdown=scoped_md,
+                        emit_links=emit_links_flag,
+                    )
                     pages.append(homepage)
 
                     # Link discovery and selection from homepage
@@ -361,16 +380,24 @@ def main() -> int:
                         try:
                             log_event(logger, "subpage_attempt", details={"domain": domain, "url": link})
                             r2 = await crawler.arun(url=link, config=run)
-                            page_rec = make_page_record(link, r2, keywords=cfg.get("keywords", []))
-                            # Attach selection diagnostics if available
+                            cleaned_html2 = getattr(r2, "cleaned_html", "") or ""
+                            try:
+                                scoped_md2 = scoped_markdown_from_html(cleaned_html2, content_selectors, base_url=link)
+                            except Exception:
+                                scoped_md2 = ""
+                            page_rec = make_page_record(
+                                link,
+                                r2,
+                                keywords=cfg.get("keywords", []),
+                                scoped_markdown=scoped_md2,
+                                emit_links=emit_links_flag,
+                            )
+                            # Attach only selection_reason for transparency; omit other scoring details
                             if link in selection_info_map:
-                                info = selection_info_map[link]
-                                page_rec["bucket"] = info.get("bucket")
-                                page_rec["intrinsic_score"] = info.get("intrinsic_score")
-                                page_rec["contextual_score"] = info.get("contextual_score")
-                                page_rec["total_score"] = info.get("final_score")
-                                page_rec["selection_reason"] = info.get("selection_reason")
-                                page_rec["matched_slugs"] = info.get("matched_slugs")
+                                info = selection_info_map.get(link, {})
+                                sel_reason = info.get("selection_reason")
+                                if isinstance(sel_reason, str) and sel_reason:
+                                    page_rec["selection_reason"] = sel_reason
                             pages.append(page_rec)
                             log_event(logger, "subpage_ok", details={
                                 "domain": domain,
@@ -418,8 +445,8 @@ def main() -> int:
                         deduped.append(p)
                     pages = deduped
 
-                    # Content guard: if no content extracted at all, treat as EMPTY_CONTENT
-                    has_any_content = any((p.get("markdown_fit")) for p in pages)
+                    # Content guard: accept if either scoped or raw markdown exists
+                    has_any_content = any(((p.get("markdown_scoped") or p.get("markdown_raw") or p.get("markdown_fit"))) for p in pages)
                     if not has_any_content:
                         reason = "EMPTY_CONTENT"
                         rec = {

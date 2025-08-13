@@ -30,5 +30,26 @@
   "respect_robots": false,
   "robots_overrides": ["fpsweb.net"],
   "content_filter_threshold": 0.2,
-  "sampling_ignore_robots": true
+  "sampling_ignore_robots": true,
+  "emit_links": false,
+  "content_selectors": [
+    "main",
+    "article",
+    "#content",
+    ".content",
+    ".main",
+    ".main-content",
+    ".container .content",
+    "#primary",
+    "section#services",
+    ".services",
+    ".services-section",
+    ".our-services",
+    "#main-content",
+    ".content-area",
+    ".page-content",
+    ".container section",
+    ".container .row",
+    ".section"
+  ]
 }
