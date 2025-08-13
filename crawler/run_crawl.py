@@ -29,6 +29,7 @@ from .session import stable_session_id, build_headers
 from .canonical import canonicalize_domain, is_robot_disallowed
 from .politeness import jitter_delay_seconds, backoff_sequence
 from .output_writer import open_jsonl, write_record
+from .report_md import generate_markdown_report
 from .extraction import make_page_record
 from .link_selection import (
     rank_links_by_priority,
@@ -55,6 +56,8 @@ except Exception:  # pragma: no cover
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from crawl4ai.content_filter_strategy import PruningContentFilter
 import argparse
+import urllib.request
+import ssl
 
 
 def main() -> int:
@@ -211,12 +214,15 @@ def main() -> int:
                         session_id=stable_session_id(domain),
                         simulate_user=True,
                         magic=True,
-                        excluded_tags=cfg.get("excluded_tags", ["nav", "footer", "script", "style"]),
-                        exclude_external_links=cfg.get("exclude_external_links", True),
+                         # Do not exclude nav/footer for link discovery; rely on content filter for markdown noise
+                         excluded_tags=cfg.get("excluded_tags_for_content_only", ["script", "style"]),
+                         # Allow external links at crawl time to capture cross-subdomain (apex/www) as internal later
+                         exclude_external_links=cfg.get("exclude_external_links", False),
                         process_iframes=True,
                         remove_overlay_elements=True,
                         word_count_threshold=10,
                         page_timeout=cfg.get("page_timeout_ms", 30000),
+                         # Short wait can be emulated by page_timeout and simulate_user; omit unsupported param
                         stream=False,
                         verbose=False,
                         score_links=True,
@@ -277,9 +283,58 @@ def main() -> int:
                             internal_links = [l for l in (_norm_link(x) for x in links_obj) if l]
 
                     # Fallback: if no internal links, try extracting anchors from HTML
-                    if not internal_links:
-                        html = getattr(result, "cleaned_html", None) or ""
-                        internal_links = extract_anchors_from_html(canonical_url, html, cfg.get("disallowed_paths", []))
+                    # Always augment with anchors from RAW HTML (not cleaned) to avoid losing nav/footer
+                    def _fetch_raw(url: str) -> str:
+                        try:
+                            ua = {
+                                "User-Agent": (
+                                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                    "Chrome/126.0.0.0 Safari/537.36"
+                                )
+                            }
+                            req = urllib.request.Request(url, headers=ua)
+                            ctx = ssl.create_default_context()
+                            with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
+                                return resp.read().decode("utf-8", errors="ignore")
+                        except Exception:
+                            return ""
+
+                    html = _fetch_raw(canonical_url) or getattr(result, "cleaned_html", None) or ""
+                    anchors = extract_anchors_from_html(canonical_url, html, cfg.get("disallowed_paths", []))
+                    # Merge while preserving existing
+                    merged = list(internal_links)
+                    for a in anchors:
+                        if a not in merged:
+                            merged.append(a)
+                    internal_links = merged
+
+                    # Also merge anchors into raw dicts so scoring-aware selector sees them
+                    if internal_links_raw is None or not isinstance(internal_links_raw, list):
+                        internal_links_raw = []
+                    hrefs_in_raw = set()
+                    for x in internal_links_raw:
+                        if isinstance(x, dict):
+                            h = x.get("href") or x.get("url")
+                            if isinstance(h, str) and h:
+                                hrefs_in_raw.add(h)
+                    for a in anchors:
+                        if a not in hrefs_in_raw:
+                            internal_links_raw.append({"href": a, "text": ""})
+
+                    # Targeted services probing when not present: synthesize /services and check HEAD
+                    def _head_ok(url: str) -> bool:
+                        try:
+                            req = urllib.request.Request(url, method='HEAD')
+                            with urllib.request.urlopen(req, timeout=10) as resp:
+                                return 200 <= getattr(resp, 'status', 200) < 400
+                        except Exception:
+                            return False
+                    from urllib.parse import urlsplit, urlunsplit
+                    sp = urlsplit(canonical_url)
+                    services_url = urlunsplit((sp.scheme, sp.netloc, '/services', '', ''))
+                    if services_url not in hrefs_in_raw and _head_ok(services_url):
+                        internal_links_raw.append({"href": services_url, "text": "Services"})
 
                     # Log counts for debugging
                     log_event(logger, "link_selection", details={
@@ -294,7 +349,7 @@ def main() -> int:
                     selection_info_map: Dict[str, Any] = {}
                     selected_links: List[str] = []
                     if internal_links_raw:
-                        sel_threshold = float(cfg.get("selection_score_threshold", 0.3))
+                        sel_threshold = float(cfg.get("selection_score_threshold", 0.15))
                         selected_links, selection_info_map = select_links_with_scoring(
                             internal_links_raw,
                             base_url=canonical_url,
@@ -434,6 +489,11 @@ def main() -> int:
                 await asyncio.gather(*[worker(d) for d in domains])
 
         log_summary(logger, total=total, ok=ok, fail=fail, retry=retry, reasons=failure_reasons)
+        try:
+            # AIDEV-NOTE: Emit human-friendly Markdown next to output.jsonl
+            generate_markdown_report(args.output_jsonl, args.input_csv)
+        except Exception as e:
+            logger.info(f"Failed to generate markdown report: {e}")
         return 0 if fail == 0 else 1
 
     return asyncio.run(crawl_all())

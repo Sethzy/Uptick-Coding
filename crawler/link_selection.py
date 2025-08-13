@@ -28,6 +28,22 @@ def is_internal_link(base: str, href: str) -> bool:
         return False
 
 
+def _fold_www(host: str) -> str:
+    h = (host or "").lower()
+    return h[4:] if h.startswith("www.") else h
+
+
+def _same_site(base_url: str, href: str) -> bool:
+    try:
+        b = urlparse(base_url)
+        u = urlparse(urljoin(base_url, href))
+        if u.scheme not in {"http", "https"}:
+            return False
+        return _fold_www(b.netloc) == _fold_www(u.netloc)
+    except Exception:
+        return False
+
+
 def filter_internal_links(base: str, hrefs: Iterable[str], disallowed_paths: Sequence[str]) -> List[str]:
     out: List[str] = []
     for h in hrefs:
@@ -100,6 +116,7 @@ _WHITELIST_TIER1 = [
 
 _WHITELIST_TIER2 = [
     "fire", "alarm", "testing", "extinguishers", "repair", "system",
+    "design", "monitoring",
 ]
 
 
@@ -151,6 +168,34 @@ def _match_whitelist_slug(url: str) -> Tuple[Optional[str], int]:
     return None, 0
 
 
+def _query_contains_services(url: str) -> bool:
+    try:
+        q = urlparse(url).query.lower()
+    except Exception:
+        return False
+    if not q:
+        return False
+    return ("service=" in q) or ("services=" in q) or ("=service" in q) or ("=services" in q) or ("services" in q and "page" in q)
+
+
+def _title_or_anchor_services(link: Dict[str, Any]) -> bool:
+    title = (((link.get("head_data") or {}).get("title")) or "").lower()
+    text = (link.get("text") or "").lower()
+    return ("services" in title) or ("services" in text)
+
+
+def _match_whitelist_in_title_or_anchor(link: Dict[str, Any]) -> Tuple[Optional[str], int]:
+    title = (((link.get("head_data") or {}).get("title")) or "").lower()
+    text = (link.get("text") or "").lower()
+    for s in _WHITELIST_TIER1:
+        if s in title or s in text:
+            return s, 1
+    for s in _WHITELIST_TIER2:
+        if s in title or s in text:
+            return s, 2
+    return None, 0
+
+
 def _path_length(url: str) -> int:
     return len(_path_segments(url))
 
@@ -183,9 +228,7 @@ def select_links_with_scoring(
         href = link.get("href") or link.get("url") or ""
         if not href:
             continue
-        # only internal
-        if not is_internal_link(base_url, href):
-            continue
+        # Trust Crawl4AI internal classification; do not re-drop here
         # dedupe by normalized href
         if href in seen:
             continue
@@ -195,19 +238,21 @@ def select_links_with_scoring(
         if _is_service_area(link):
             continue
 
-        # whitelist for top-level pages without hub
-        if _is_top_level_without_hub(href) and not _is_services_hub_or_child(href):
-            slug, tier = _match_whitelist_slug(href)
-            if tier == 0:
-                # not whitelisted → drop
-                continue
-            link["_matched_slugs"] = [slug] if slug else []
-            link["_whitelist_tier"] = tier
-        else:
-            # still record slug matches (for boosts/observability)
-            slug, tier = _match_whitelist_slug(href)
-            link["_matched_slugs"] = [slug] if slug else []
-            link["_whitelist_tier"] = tier
+        # detect whitelist slugs from URL, title, or anchor
+        slug_url, tier_url = _match_whitelist_slug(href)
+        slug_txt, tier_txt = _match_whitelist_in_title_or_anchor(link)
+        tier = max(tier_url, tier_txt)
+        slug = slug_url or slug_txt
+        link["_matched_slugs"] = [slug] if slug else []
+        link["_whitelist_tier"] = tier
+
+        # services-intent detection
+        services_hub_signal = _is_services_hub_or_child(href) or _query_contains_services(href) or _title_or_anchor_services(link)
+        # Stronger signal: exact 'services' anchor or title
+        title = (((link.get("head_data") or {}).get("title")) or "").strip().lower()
+        text = (link.get("text") or "").strip().lower()
+        if text == "services" or title == "services" or "\nservices\n" in text:
+            services_hub_signal = True
 
         # base scores from Crawl4AI if present
         intrinsic = link.get("intrinsic_score")
@@ -223,16 +268,15 @@ def select_links_with_scoring(
             ct = float(contextual) if isinstance(contextual, (int, float)) else 0.0
             base_total = 0.6 * ct + 0.4 * it
 
-        # thresholding
-        if base_total < score_threshold:
-            # still allow if services hub or Tier1 — but only marginally below
-            if not (_is_services_hub_or_child(href) or link.get("_whitelist_tier") == 1):
-                continue
+        # thresholding (bypass for confirmed services hub or Tier1 via any channel)
+        if base_total < score_threshold and not (services_hub_signal or link.get("_whitelist_tier") == 1):
+            # Skip adding this candidate
+            continue
 
         # boosts
         boost = 0.0
-        if _is_services_hub_or_child(href):
-            boost += 0.30  # strong hub boost
+        if services_hub_signal:
+            boost += 0.30  # strong hub boost, inferred by path/query/title/anchor
         tier = link.get("_whitelist_tier") or 0
         if tier == 1:
             boost += 0.20
@@ -256,11 +300,13 @@ def select_links_with_scoring(
             "path_len": _path_length(href),
             "matched_slugs": link.get("_matched_slugs", []),
             "selection_reason": _build_selection_reason(href, base_total, boost, bucket_name, link.get("_matched_slugs", [])),
+            "_services_intent": services_hub_signal or (tier > 0),
         })
 
-    # sort and select deterministically
+    # sort and select deterministically (prefer services intent in tie situations)
     candidates.sort(key=lambda x: (
         -x["final_score"],
+        0 if x.get("_services_intent") else 1,
         x["bucket_idx"],
         x["path_len"],
         x["href"],
@@ -276,6 +322,25 @@ def select_links_with_scoring(
             continue
         info_map[h] = c
         selected.append(h)
+
+    # Deterministic backfill if under cap
+    if len(selected) < cap:
+        remaining = [c for c in candidates if c["href"] not in info_map]
+        # prefer remaining services-intent first
+        remaining.sort(key=lambda x: (
+            0 if x.get("_services_intent") else 1,
+            x["bucket_idx"],
+            x["path_len"],
+            x["href"],
+        ))
+        for c in remaining:
+            if len(selected) >= cap:
+                break
+            h = c["href"]
+            info = info_map.get(h) or dict(c)
+            info["selection_reason"] = (info.get("selection_reason") or "") + (";" if info.get("selection_reason") else "") + ("backfill:" + info.get("bucket", ""))
+            info_map[h] = info
+            selected.append(h)
 
     return selected, info_map
 
