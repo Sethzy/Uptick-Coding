@@ -56,8 +56,6 @@ except Exception:  # pragma: no cover
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from crawl4ai.content_filter_strategy import PruningContentFilter
 import argparse
-import urllib.request
-import ssl
 
 
 def main() -> int:
@@ -283,24 +281,8 @@ def main() -> int:
                             internal_links = [l for l in (_norm_link(x) for x in links_obj) if l]
 
                     # Fallback: if no internal links, try extracting anchors from HTML
-                    # Always augment with anchors from RAW HTML (not cleaned) to avoid losing nav/footer
-                    def _fetch_raw(url: str) -> str:
-                        try:
-                            ua = {
-                                "User-Agent": (
-                                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                    "Chrome/126.0.0.0 Safari/537.36"
-                                )
-                            }
-                            req = urllib.request.Request(url, headers=ua)
-                            ctx = ssl.create_default_context()
-                            with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
-                                return resp.read().decode("utf-8", errors="ignore")
-                        except Exception:
-                            return ""
-
-                    html = _fetch_raw(canonical_url) or getattr(result, "cleaned_html", None) or ""
+                    # Use the DOM-rendered HTML from Crawl4AI (nav/footer kept for discovery)
+                    html = getattr(result, "cleaned_html", None) or ""
                     anchors = extract_anchors_from_html(canonical_url, html, cfg.get("disallowed_paths", []))
                     # Merge while preserving existing
                     merged = list(internal_links)
@@ -322,19 +304,7 @@ def main() -> int:
                         if a not in hrefs_in_raw:
                             internal_links_raw.append({"href": a, "text": ""})
 
-                    # Targeted services probing when not present: synthesize /services and check HEAD
-                    def _head_ok(url: str) -> bool:
-                        try:
-                            req = urllib.request.Request(url, method='HEAD')
-                            with urllib.request.urlopen(req, timeout=10) as resp:
-                                return 200 <= getattr(resp, 'status', 200) < 400
-                        except Exception:
-                            return False
-                    from urllib.parse import urlsplit, urlunsplit
-                    sp = urlsplit(canonical_url)
-                    services_url = urlunsplit((sp.scheme, sp.netloc, '/services', '', ''))
-                    if services_url not in hrefs_in_raw and _head_ok(services_url):
-                        internal_links_raw.append({"href": services_url, "text": "Services"})
+                    # No targeted probing here; rely on DOM discovery only
 
                     # Log counts for debugging
                     log_event(logger, "link_selection", details={

@@ -13,7 +13,7 @@
 | Domain | Status | Reason | Pages | Canonical URL |
 | --- | --- | --- | --- | --- |
 | veteran-fire.com | OK |  | 5 | https://veteran-fire.com |
-| shieldfireprotection.com | OK |  | 2 | https://www.shieldfireprotection.com/ |
+| shieldfireprotection.com | OK |  | 3 | https://www.shieldfireprotection.com/ |
 | colonialfire.com | OK |  | 6 | https://www.colonialfire.com/ |
 | capitolfire.com | OK |  | 5 | https://www.capitolfire.com/ |
 
@@ -24,7 +24,7 @@
 - **reason**: -
 - **pages_visited**: 5
 - **canonical_url**: https://veteran-fire.com
-- **crawl_ts**: 2025-08-13T04:30:22.055095+00:00
+- **crawl_ts**: 2025-08-13T04:48:18.921695+00:00
   - Page 1: https://veteran-fire.com
     - title: Home - Veteran Fire and Backflow
     - text_length: 3806
@@ -60,9 +60,9 @@ Welcome to Veteran Fire & Backflow, where safeguarding lives and properties is o
 
 - **status**: OK
 - **reason**: -
-- **pages_visited**: 2
+- **pages_visited**: 3
 - **canonical_url**: https://www.shieldfireprotection.com/
-- **crawl_ts**: 2025-08-13T04:30:34.513277+00:00
+- **crawl_ts**: 2025-08-13T04:48:28.394920+00:00
   - Page 1: https://www.shieldfireprotection.com/
     - title: Home | Shield Fire Protection
     - text_length: 542
@@ -79,6 +79,14 @@ Welcome to Veteran Fire & Backflow, where safeguarding lives and properties is o
 
 
 #### Shield Fire Protection specializes in the Inspection, Testing, Maintenance, and Installation of your fire and life safety systems to ensure compliance with NFPA 25, as required by the State Fire Marshal. With industry trained inspectors providing routine inspections and maintenance to your fire and life safety systems we can ensure the proper op…
+  - Page 3: https://www.shieldfireprotection.com/services/
+    - title: Home | Shield Fire Protection
+    - text_length: 542
+    - headings: ##, Shield Fire Protection specializes in the Inspection, Testing, Maintenance, and Installation of your fire and life safety systems to ensure compliance with NFPA 25, as required by the State Fire Marshal. With industry trained inspectors providing routine inspections and maintenance to your fire and life safety systems we can ensure the proper operation should an emergency occur, while also minimizing costs., NFPA 25 Compliance: Quarterly, Annual, and 5 Year Inspections as Required by the California State Fire Marshal
+    - content_sample: * ## 
+
+
+#### Shield Fire Protection specializes in the Inspection, Testing, Maintenance, and Installation of your fire and life safety systems to ensure compliance with NFPA 25, as required by the State Fire Marshal. With industry trained inspectors providing routine inspections and maintenance to your fire and life safety systems we can ensure the proper op…
 
 ### colonialfire.com
 
@@ -86,7 +94,7 @@ Welcome to Veteran Fire & Backflow, where safeguarding lives and properties is o
 - **reason**: -
 - **pages_visited**: 6
 - **canonical_url**: https://www.colonialfire.com/
-- **crawl_ts**: 2025-08-13T04:30:58.834004+00:00
+- **crawl_ts**: 2025-08-13T04:48:49.079952+00:00
   - Page 1: https://www.colonialfire.com/
     - title: Fire Protection System Supplier | Colonial Fire Protection Systems, Inc.
     - text_length: 415
@@ -122,7 +130,7 @@ Copyri…
 - **reason**: -
 - **pages_visited**: 5
 - **canonical_url**: https://www.capitolfire.com/
-- **crawl_ts**: 2025-08-13T04:31:13.871146+00:00
+- **crawl_ts**: 2025-08-13T04:49:00.536357+00:00
   - Page 1: https://www.capitolfire.com/
     - title: NYC Fire Sprinkler Inspections, Repairs and Installations | Capitol Fire Sprinkler
     - text_length: 2599

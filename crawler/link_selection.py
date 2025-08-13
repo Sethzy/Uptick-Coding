@@ -200,6 +200,28 @@ def _path_length(url: str) -> int:
     return len(_path_segments(url))
 
 
+def _is_contact_page(link: Dict[str, Any]) -> bool:
+    """Detect generic contact pages by URL path/query, title, or anchor text.
+
+    AIDEV-NOTE: We avoid over-broad matches (e.g., plain 'quote'). Penalize
+    classic contact endpoints like '/contact', 'contact_us', 'contact-us',
+    and CTA equivalents like 'get-a-quote' or 'request-quote'.
+    """
+    href = (link.get("href") or link.get("url") or "").lower()
+    try:
+        u = urlparse(href)
+        path_q = f"{u.path or ''}?{u.query or ''}"
+    except Exception:
+        path_q = href
+    title = (((link.get("head_data") or {}).get("title")) or "").lower()
+    text = (link.get("text") or "").lower()
+    needles = ["/contact", "contact_us", "contact-us", "get-a-quote", "request-quote"]
+    def contains_contact(s: str) -> bool:
+        s = s or ""
+        return any(n in s for n in needles)
+    return contains_contact(path_q) or contains_contact(title) or contains_contact(text)
+
+
 def select_links_with_scoring(
     internal_links: Sequence[Dict[str, Any]],
     *,
