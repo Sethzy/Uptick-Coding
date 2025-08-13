@@ -16,21 +16,19 @@
     "/legal",
     "/sso"
   ],
-  "link_priority_buckets": [
-    { "name": "services", "patterns": ["/services", "/capabilities"] },
-    { "name": "industries", "patterns": ["/industries", "/markets"] },
-    { "name": "about", "patterns": ["/about", "/company"] }
-  ],
+  
   "page_cap": 5,
   "per_domain_delay_seconds": { "min": 1.5, "max": 2.0, "jitter": 0.4 },
   "global_concurrency": 4,
   "retries": 2,
   "page_timeout_ms": 60000,
+  "canonicalization_timeout_sec": 12.0,
+  "canonicalization_retries": 2,
   "allow_blog_if_keywords": true,
   "exclude_external_links": true,
   "excluded_tags": ["nav", "footer", "script", "style"],
-  "respect_robots": true,
+  "respect_robots": false,
   "robots_overrides": ["fpsweb.net"],
   "content_filter_threshold": 0.2,
-  "sampling_ignore_robots": false
+  "sampling_ignore_robots": true
 }

@@ -25,17 +25,15 @@ except Exception:  # pragma: no cover
 
 from .logging import get_logger, log_event, log_progress, log_summary
 from .reachability import load_domains_from_csv
-from .session import stable_session_id, build_headers
+from .session import stable_session_id
 from .canonical import canonicalize_domain, is_robot_disallowed
-from .politeness import jitter_delay_seconds, backoff_sequence
+from .politeness import jitter_delay_seconds
 from .output_writer import open_jsonl, write_record
 from .report_md import generate_markdown_report
 from .extraction import make_page_record
 from .link_selection import (
-    rank_links_by_priority,
-    select_top_links,
     extract_anchors_from_html,
-    select_links_with_scoring,
+    select_links_simple,
 )
 from .checkpoint import load_checkpoint, save_checkpoint, mark_attempt, mark_success
 
@@ -85,6 +83,8 @@ def main() -> int:
     parser.add_argument("--concurrency", type=int, default=int(os.getenv("CONCURRENCY", "1")))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--column", default=os.getenv("DOMAIN_COLUMN", "tam_site"), help="CSV column to read domains from (default: tam_site)")
+    parser.add_argument("--robots", choices=["respect", "ignore", "auto"], default=os.getenv("ROBOTS_MODE", "auto"), help="Robots handling: respect, ignore, or auto (use config)")
     args = parser.parse_args()
 
     # Runtime config
@@ -94,7 +94,7 @@ def main() -> int:
 
     # Load domains
     try:
-        all_domains = load_domains_from_csv(args.input_csv)
+        all_domains = load_domains_from_csv(args.input_csv, column=args.column)
     except Exception as e:
         logger.info(f"Failed to load CSV: {e}")
         return 1
@@ -139,7 +139,14 @@ def main() -> int:
                     save_checkpoint(args.checkpoint, cp)
 
                     # canonicalization
-                    canonical_url = await canonicalize_domain(domain)
+                    # Allow config overrides for timeouts/retries if present
+                    canon_timeout = float(cfg.get("canonicalization_timeout_sec", 12.0))
+                    canon_retries = int(cfg.get("canonicalization_retries", 2))
+                    canonical_url = await canonicalize_domain(
+                        domain,
+                        timeout=canon_timeout,
+                        max_retries=canon_retries,
+                    )
                     if not canonical_url:
                         reason = "DNS_FAIL"
                         rec = {
@@ -159,9 +166,19 @@ def main() -> int:
                         save_checkpoint(args.checkpoint, cp)
                         return
 
-                    # robots preflight with optional global sampling override
-                    respect_robots = cfg.get("respect_robots", True)
-                    sampling_ignore_robots = cfg.get("sampling_ignore_robots", False)
+                    # robots preflight with CLI override
+                    respect_robots_cfg = bool(cfg.get("respect_robots", True))
+                    sampling_ignore_cfg = bool(cfg.get("sampling_ignore_robots", False))
+                    robots_mode = getattr(args, "robots", "auto")
+                    if robots_mode == "respect":
+                        respect_robots = True
+                        sampling_ignore_robots = False
+                    elif robots_mode == "ignore":
+                        respect_robots = False
+                        sampling_ignore_robots = True
+                    else:
+                        respect_robots = respect_robots_cfg
+                        sampling_ignore_robots = sampling_ignore_cfg
                     overrides = set(cfg.get("robots_overrides", []))
                     if (respect_robots and not sampling_ignore_robots) and (domain not in overrides) and await is_robot_disallowed(canonical_url):
                         reason = "ROBOT_DISALLOW"
@@ -205,10 +222,12 @@ def main() -> int:
                         except Exception:
                             lp = None
 
+                    check_robots_txt = bool(respect_robots and not sampling_ignore_robots)
+
                     run = CrawlerRunConfig(
                         markdown_generator=md,
                         cache_mode=CacheMode.BYPASS,
-                        check_robots_txt=True,
+                        check_robots_txt=check_robots_txt,
                         session_id=stable_session_id(domain),
                         simulate_user=True,
                         magic=True,
@@ -312,24 +331,18 @@ def main() -> int:
                         "internal_links_found": len(internal_links),
                         "internal_links_raw": len(internal_links_raw),
                     })
-                    # Rank by score + patterns when raw dicts available; else fallback to buckets
-                    buckets = cfg.get("link_priority_buckets", [])
+                    # Always use simple selector per spec (ctx_weight=0)
                     cap = int(cfg.get("page_cap", 4))
+                    disallowed_paths = cfg.get("disallowed_paths", [])
 
                     selection_info_map: Dict[str, Any] = {}
                     selected_links: List[str] = []
-                    if internal_links_raw:
-                        sel_threshold = float(cfg.get("selection_score_threshold", 0.15))
-                        selected_links, selection_info_map = select_links_with_scoring(
-                            internal_links_raw,
-                            base_url=canonical_url,
-                            buckets=buckets,
-                            cap=cap,
-                            score_threshold=sel_threshold,
-                        )
-                    else:
-                        ranked = rank_links_by_priority(internal_links, buckets)
-                        selected_links = select_top_links(ranked, cap)
+                    selected_links, selection_info_map = select_links_simple(
+                        internal_links_raw,
+                        base_url=canonical_url,
+                        cap=cap,
+                        disallowed_paths=disallowed_paths,
+                    )
                     # Exclude homepage from selection and enforce cap again
                     def _norm(u: str) -> str:
                         return (u or "").rstrip('/')

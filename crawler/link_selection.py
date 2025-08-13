@@ -1,25 +1,47 @@
 """
-Purpose: Link discovery and priority-based selection for targeted crawling.
-Description: Extracts internal links, applies hard-excludes and whitelist rules,
-             and supports two strategies:
-             - Legacy deterministic bucket ranking for href strings
-             - Scoring-aware selection for Crawl4AI link preview outputs
-Key Functions: filter_internal_links, rank_links_by_priority, select_top_links,
-               select_links_with_scoring
+Purpose: Link discovery, filtering, ranking, and selection logic for the crawler.
+Description: Provides helpers to identify internal links, extract anchors from
+             HTML, and apply deterministic rule-first ranking and selection.
+Key Functions: is_internal_link,
+               extract_anchors_from_html,
+               select_links_with_scoring,
+               apply_blog_news_rule,
+               select_links_simple
 
-AIDEV-NOTE: Deterministic selection using stable sorting and bucket order. When
-            scores are available, sort by total_score desc with deterministic
-            tie-breakers.
+AIDEV-NOTE: Deterministic sorting is critical. Tie-breakers are bucket order
+            (as provided by config), then path length, then URL lexicographic.
 """
 
 from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Sequence, Tuple, Optional
 from urllib.parse import urljoin, urlparse
 import re
-from bs4 import BeautifulSoup
 
+try:
+    from bs4 import BeautifulSoup  # type: ignore
+except Exception:  # pragma: no cover
+    BeautifulSoup = None  # type: ignore
+
+
+# -------------------- Core helpers --------------------
 
 def is_internal_link(base: str, href: str) -> bool:
+    """
+    Return True if href resolves to the same origin as base (http/https only).
+
+    Args:
+        base: Absolute base URL (e.g., "https://acme.com").
+        href: Possibly relative or absolute link to test.
+
+    Returns:
+        True when the resolved URL has the same netloc and an http/https scheme.
+
+    Example:
+        >>> is_internal_link("https://acme.com", "/services")
+        True
+        >>> is_internal_link("https://acme.com", "https://example.org/about")
+        False
+    """
     try:
         b = urlparse(base)
         u = urlparse(urljoin(base, href))
@@ -28,23 +50,248 @@ def is_internal_link(base: str, href: str) -> bool:
         return False
 
 
-def _fold_www(host: str) -> str:
-    h = (host or "").lower()
-    return h[4:] if h.startswith("www.") else h
-
-
-def _same_site(base_url: str, href: str) -> bool:
+def _normalize_url_for_match(url: str) -> str:
+    """Lowercase, strip trailing slash for stable substring checks."""
     try:
-        b = urlparse(base_url)
-        u = urlparse(urljoin(base_url, href))
-        if u.scheme not in {"http", "https"}:
-            return False
-        return _fold_www(b.netloc) == _fold_www(u.netloc)
+        u = urlparse(url)
+        path = (u.path or "/").lower().rstrip("/")
+        q = (u.query or "").lower()
+        return path + (f"?{q}" if q else "")
     except Exception:
-        return False
+        s = (url or "").lower().rstrip("/")
+        return s
 
+
+def _text_fields_lower(link: Dict[str, Any]) -> Tuple[str, str]:
+    title = (((link.get("head_data") or {}).get("title")) or "").strip().lower()
+    text = (link.get("text") or "").strip().lower()
+    return title, text
+
+
+def _path_length(url: str) -> int:
+    try:
+        p = urlparse(url).path or "/"
+        return len([seg for seg in p.split("/") if seg])
+    except Exception:
+        return 0
+
+
+def _is_service_area(link: Dict[str, Any]) -> bool:
+    """Heuristics to drop city/region service-area pages from targeted crawl.
+
+    Rules tightened to avoid conflict with `/services` and false positives like
+    `/areas-of-expertise`:
+    - Only match when the FIRST path segment is one of the known area prefixes
+      (e.g., `service-areas`, `locations`, `regions`, etc.)
+    - Remove generic `/areas` token to avoid substring collisions
+    - Keep text-based hints as a fallback
+    
+    Args:
+        link: Dict with at least `href` and optional `text`.
+
+    Returns:
+        True if the URL/text indicates a service-area landing.
+    """
+    href = (link.get("href") or link.get("url") or "").lower()
+    text = (link.get("text") or "").lower()
+    try:
+        u = urlparse(href)
+        segs = [s for s in (u.path or "/").lower().strip("/").split("/") if s]
+        first = segs[0] if segs else ""
+    except Exception:
+        first = ""
+    area_prefixes = {
+        "service-area",
+        "service-areas",
+        "servicearea",
+        "areas-we-serve",
+        "locations",
+        "location",
+        "territories",
+        "coverage",
+        "where-we-work",
+        "region",
+        "regions",
+    }
+    if first in area_prefixes:
+        return True
+    if "service area" in text or "areas we serve" in text:
+        return True
+    return False
+
+
+# Whitelists for strong service intent
+_WHITELIST_TIER1: Sequence[str] = (
+    # A/B absolute terms (exact per spec)
+    "installation",
+    "install",
+    "maintenance",
+    "inspection",
+    "protection",
+)
+
+_WHITELIST_TIER2: Sequence[str] = (
+    # U URL service terms (exact per spec)
+    "fire",
+    "alarm",
+    "testing",
+    "extinguishers",
+    "repair",
+    "system",
+    "design",
+    "monitoring",
+    "commissioning",
+    "commission",
+)
+
+
+def _category_for_link(href: str, link: Dict[str, Any]) -> Tuple[str, int, bool, str]:
+    """
+    Determine rule-first category and base score:
+    A: /services (base 80; +20 boost if absolute term also in URL)
+    B: absolute TIER1 terms in URL (base 85)
+    C: /about (base 75)
+    U: TIER2 terms in URL (base 60)
+    T: 'services' in text or absolute term in text (base 50)
+    D: other (base 0)
+    Returns (category, base_score, a_only_boost_applies, matched_term)
+    
+    Args:
+        href: Absolute URL for the link being classified.
+        link: Original link dict with optional `text` and `head_data.title`.
+
+    Returns:
+        Tuple of (category, base score, A-only boost flag, matched term for audit).
+    """
+    low = _normalize_url_for_match(href)
+    title, text = _text_fields_lower(link)
+    absolute_terms = set(_WHITELIST_TIER1)
+    url_service_terms = set(_WHITELIST_TIER2)
+    if low.startswith("/services"):
+        matched = next((t for t in absolute_terms if t in low), None)
+        return "A", 80, bool(matched), matched or ""
+    matched = next((t for t in absolute_terms if t in low), None)
+    if matched:
+        return "B", 85, False, matched
+    if low.startswith("/about"):
+        return "C", 75, False, ""
+    matched = next((t for t in url_service_terms if t in low), None)
+    if matched:
+        return "U", 60, False, matched
+    if ("services" in title) or ("services" in text):
+        return "T", 50, False, "services"
+    matched = next((t for t in absolute_terms if t in title or t in text), None)
+    if matched:
+        return "T", 50, False, matched
+    return "D", 0, False, ""
+
+
+# -------------------- Simple selection (rule-first; no contextual weight) --------------------
+
+def select_links_simple(
+    internal_links: Sequence[Dict[str, Any]],
+    *,
+    base_url: str,
+    cap: int,
+    disallowed_paths: Sequence[str] | None = None,
+) -> Tuple[List[str], Dict[str, Dict[str, Any]]]:
+    """
+    Deterministic selector using rule-first categories only (no contextual score).
+    Sort by final_score desc, path_len asc, href asc.
+
+    Args:
+        internal_links: Links from Crawl4AI (list of dicts with `href`/`url`, `text`).
+        base_url: Canonical homepage used for internal filtering and normalization.
+        cap: Maximum number of links to return.
+        disallowed_paths: Paths to be excluded (prefix match), e.g. ["/privacy"].
+
+    Returns:
+        (selected_hrefs, selection_info_map). The map includes category, base,
+        a_boost, final_score, path_len, matched_slugs, selection_reason.
+
+    Example:
+        >>> select_links_simple([{"href": "/services"}], base_url="https://acme.com", cap=3)
+        (['https://acme.com/services'], {...})
+    """
+    disallowed_paths = tuple(disallowed_paths or ())
+
+    def _norm_href(x: Any) -> str:
+        if isinstance(x, str):
+            return x
+        if isinstance(x, dict):
+            return x.get("url") or x.get("href") or ""
+        h = getattr(x, "url", None) or getattr(x, "href", None)
+        return h if isinstance(h, str) else ""
+
+    def _norm(u: str) -> str:
+        return (u or "").rstrip("/")
+
+    homepage = _norm(base_url)
+    seen: set[str] = set()
+    candidates: List[Dict[str, Any]] = []
+    for link in internal_links:
+        href = _norm_href(link)
+        if not href:
+            continue
+        try:
+            if not is_internal_link(base_url, href):
+                continue
+            u = urlparse(urljoin(base_url, href))
+            path = u.path or "/"
+            if any(path.startswith(p) for p in disallowed_paths):
+                continue
+        except Exception:
+            continue
+        abs_href = u.geturl()
+        if _norm(abs_href) == homepage:
+            continue
+        if abs_href in seen:
+            continue
+        seen.add(abs_href)
+        if _is_service_area({"href": abs_href, "text": link.get("text", "")} if isinstance(link, dict) else {"href": abs_href, "text": ""}):
+            continue
+        category, base_score, a_boost_flag, matched_term = _category_for_link(abs_href, link if isinstance(link, dict) else {})
+        a_boost = 20 if (category == "A" and a_boost_flag) else 0
+        final_score = base_score + a_boost
+        candidates.append({
+            "href": abs_href,
+            "category": category,
+            "base": base_score,
+            "a_boost": a_boost,
+            "final_score": final_score,
+            "path_len": _path_length(abs_href),
+            "matched_slugs": [matched_term] if matched_term else [],
+            "selection_reason": f"category={category};base={base_score};a_boost={('+' if a_boost>0 else '')}{a_boost};path_len={_path_length(abs_href)}",
+        })
+
+    candidates.sort(key=lambda x: (-x["final_score"], x["path_len"], x["href"]))
+    selected: List[str] = []
+    info_map: Dict[str, Dict[str, Any]] = {}
+    for c in candidates:
+        if len(selected) >= cap:
+            break
+        h = c["href"]
+        if h in info_map:
+            continue
+        info_map[h] = c
+        selected.append(h)
+    return selected, info_map
+
+
+# -------------------- HTML anchor extraction helpers --------------------
 
 def filter_internal_links(base: str, hrefs: Iterable[str], disallowed_paths: Sequence[str]) -> List[str]:
+    """
+    Normalize and return unique absolute internal URLs from raw href strings.
+
+    Args:
+        base: Base URL to resolve against.
+        hrefs: Raw href strings extracted from HTML.
+        disallowed_paths: Paths to exclude (prefix match).
+
+    Returns:
+        Deduplicated list of absolute internal URLs.
+    """
     out: List[str] = []
     for h in hrefs:
         if not h:
@@ -56,7 +303,6 @@ def filter_internal_links(base: str, hrefs: Iterable[str], disallowed_paths: Seq
         if any(path.startswith(p) for p in disallowed_paths):
             continue
         out.append(u.geturl())
-    # Deduplicate preserving order
     seen = set()
     uniq: List[str] = []
     for u in out:
@@ -65,35 +311,19 @@ def filter_internal_links(base: str, hrefs: Iterable[str], disallowed_paths: Seq
             uniq.append(u)
     return uniq
 
-
-def rank_links_by_priority(links: Sequence[str], buckets: Sequence[Dict]) -> List[Tuple[int, str]]:
-    ranked: List[Tuple[int, str]] = []
-    for link in links:
-        path = urlparse(link).path.lower()
-        score = 10_000  # default low priority
-        for idx, bucket in enumerate(buckets):
-            pats = bucket.get("patterns", [])
-            if any(re.search(p, path) for p in pats):
-                score = idx
-                break
-        ranked.append((score, link))
-    # Stable sort by score then link to ensure determinism
-    return sorted(ranked, key=lambda x: (x[0], x[1]))
-
-
-def select_top_links(ranked: Sequence[Tuple[int, str]], cap: int) -> List[str]:
-    selected: List[str] = []
-    for _, link in ranked:
-        if len(selected) >= cap:
-            break
-        if link not in selected:
-            selected.append(link)
-    return selected
-
-
 def extract_anchors_from_html(base_url: str, html: str, disallowed_paths: Sequence[str]) -> List[str]:
-    """Extract internal anchor hrefs from HTML, resolve to absolute URLs, filter disallowed, dedupe."""
-    if not html:
+    """
+    Extract internal anchor hrefs from HTML, normalize to absolute, filter and dedupe.
+
+    Args:
+        base_url: Base URL for resolving relative hrefs.
+        html: Rendered HTML string.
+        disallowed_paths: Paths to exclude (prefix match).
+
+    Returns:
+        Deduplicated list of absolute internal URLs discovered via <a href>.
+    """
+    if not html or BeautifulSoup is None:
         return []
     try:
         soup = BeautifulSoup(html, "html.parser")
@@ -107,233 +337,101 @@ def extract_anchors_from_html(base_url: str, html: str, disallowed_paths: Sequen
     return filter_internal_links(base_url, hrefs, disallowed_paths)
 
 
-# -------------------- Scoring-aware selection helpers --------------------
+# -------------------- Rule-first selection with diagnostics --------------------
 
-_WHITELIST_TIER1 = [
-    "inspection", "maintenance", "protection", "installation", "install",
-    "commissioning", "commission",
-]
-
-_WHITELIST_TIER2 = [
-    "fire", "alarm", "testing", "extinguishers", "repair", "system",
-    "design", "monitoring",
-]
-
-
-def _path_segments(url: str) -> List[str]:
-    path = urlparse(url).path or "/"
-    segs = [s for s in path.split("/") if s]
-    return segs
-
-
-def _bucket_priority_for_url(url: str, buckets: Sequence[Dict]) -> Tuple[int, str]:
-    path = (urlparse(url).path or "/").lower()
-    for idx, bucket in enumerate(buckets):
-        pats = bucket.get("patterns", [])
-        try:
-            if any(re.search(p, path) for p in pats):
-                return idx, str(bucket.get("name", f"bucket-{idx}"))
-        except Exception:
-            continue
-    return 1_000_000, "unmatched"
-
-
-def _is_service_area(link: Dict[str, Any]) -> bool:
-    href = (link.get("href") or "").lower()
-    text = (link.get("text") or "").lower()
-    return ("service-area" in href) or ("service area" in href) or ("service area" in text)
-
-
-def _is_services_hub_or_child(url: str) -> bool:
-    path = (urlparse(url).path or "/").lower()
-    return path.startswith("/services")
-
-
-def _is_top_level_without_hub(url: str) -> bool:
-    segs = _path_segments(url)
-    if not segs:
-        return False
-    # exactly one segment and not under /services
-    return len(segs) == 1 and segs[0] != "services"
-
-
-def _match_whitelist_slug(url: str) -> Tuple[Optional[str], int]:
-    low = (urlparse(url).path or "").lower()
-    for s in _WHITELIST_TIER1:
-        if s in low:
-            return s, 1
-    for s in _WHITELIST_TIER2:
-        if s in low:
-            return s, 2
-    return None, 0
-
-
-def _query_contains_services(url: str) -> bool:
-    try:
-        q = urlparse(url).query.lower()
-    except Exception:
-        return False
-    if not q:
-        return False
-    return ("service=" in q) or ("services=" in q) or ("=service" in q) or ("=services" in q) or ("services" in q and "page" in q)
-
-
-def _title_or_anchor_services(link: Dict[str, Any]) -> bool:
-    title = (((link.get("head_data") or {}).get("title")) or "").lower()
-    text = (link.get("text") or "").lower()
-    return ("services" in title) or ("services" in text)
-
-
-def _match_whitelist_in_title_or_anchor(link: Dict[str, Any]) -> Tuple[Optional[str], int]:
-    title = (((link.get("head_data") or {}).get("title")) or "").lower()
-    text = (link.get("text") or "").lower()
-    for s in _WHITELIST_TIER1:
-        if s in title or s in text:
-            return s, 1
-    for s in _WHITELIST_TIER2:
-        if s in title or s in text:
-            return s, 2
-    return None, 0
-
-
-def _path_length(url: str) -> int:
-    return len(_path_segments(url))
-
-
-def _is_contact_page(link: Dict[str, Any]) -> bool:
-    """Detect generic contact pages by URL path/query, title, or anchor text.
-
-    AIDEV-NOTE: We avoid over-broad matches (e.g., plain 'quote'). Penalize
-    classic contact endpoints like '/contact', 'contact_us', 'contact-us',
-    and CTA equivalents like 'get-a-quote' or 'request-quote'.
-    """
-    href = (link.get("href") or link.get("url") or "").lower()
-    try:
-        u = urlparse(href)
-        path_q = f"{u.path or ''}?{u.query or ''}"
-    except Exception:
-        path_q = href
-    title = (((link.get("head_data") or {}).get("title")) or "").lower()
-    text = (link.get("text") or "").lower()
-    needles = ["/contact", "contact_us", "contact-us", "get-a-quote", "request-quote"]
-    def contains_contact(s: str) -> bool:
-        s = s or ""
-        return any(n in s for n in needles)
-    return contains_contact(path_q) or contains_contact(title) or contains_contact(text)
-
+def _matched_whitelist_slugs(url_or_text: str) -> List[str]:
+    low = url_or_text.lower()
+    found: List[str] = []
+    for t in list(_WHITELIST_TIER1) + list(_WHITELIST_TIER2):
+        if t in low and t not in found:
+            found.append(t)
+    return found
 
 def select_links_with_scoring(
     internal_links: Sequence[Dict[str, Any]],
     *,
     base_url: str,
-    buckets: Sequence[Dict],
     cap: int,
-    score_threshold: float = 0.0,
-    epsilon: float = 1e-6,
+    disallowed_paths: Optional[Sequence[str]] = None,
 ) -> Tuple[List[str], Dict[str, Dict[str, Any]]]:
     """
-    Select links using Crawl4AI link preview outputs when available.
+    Rule-first selector variant that also records selection diagnostics.
 
-    - Hard-exclude `service-area` links pre-scoring.
-    - For top-level service pages without hub, enforce whitelist-only rule.
-    - Apply tiered boosts and services hub boost.
-    - Primary sort by total_score (desc). Fallback to intrinsic/contextual if needed.
-    - Deterministic tie-breakers: bucket priority asc → path length asc → URL asc.
+    Note: Contextual/intrinsic scores and bucket priorities are ignored.
 
-    Returns (selected_hrefs, selection_info_map)
+    Args:
+        internal_links: Link dicts (href/url, text, optional head_data).
+        base_url: Canonical homepage used for internal filtering and normalization.
+        cap: Maximum links to select.
+        disallowed_paths: Paths to exclude.
+
+    Returns:
+        (selected_hrefs, info_map) with deterministic ordering and selection reasons.
     """
-    # AIDEV-NOTE: We accept dicts shaped like Crawl4AI link objects
-    seen = set()
+    disallowed_paths = tuple(disallowed_paths or ())
+
+    def _norm_href(x: Any) -> str:
+        if isinstance(x, str):
+            return x
+        if isinstance(x, dict):
+            return x.get("url") or x.get("href") or ""
+        h = getattr(x, "url", None) or getattr(x, "href", None)
+        return h if isinstance(h, str) else ""
+
+    def _norm(u: str) -> str:
+        return (u or "").rstrip("/")
+
+    homepage = _norm(base_url)
+    seen: set[str] = set()
     candidates: List[Dict[str, Any]] = []
 
     for link in internal_links:
-        href = link.get("href") or link.get("url") or ""
+        href = _norm_href(link)
         if not href:
             continue
-        # Trust Crawl4AI internal classification; do not re-drop here
-        # dedupe by normalized href
-        if href in seen:
+        try:
+            if not is_internal_link(base_url, href):
+                continue
+            u = urlparse(urljoin(base_url, href))
+            path = u.path or "/"
+            if any(path.startswith(p) for p in disallowed_paths):
+                continue
+        except Exception:
             continue
-        seen.add(href)
-
-        # hard exclude service-area
-        if _is_service_area(link):
+        abs_href = u.geturl()
+        if _norm(abs_href) == homepage:
             continue
-
-        # detect whitelist slugs from URL, title, or anchor
-        slug_url, tier_url = _match_whitelist_slug(href)
-        slug_txt, tier_txt = _match_whitelist_in_title_or_anchor(link)
-        tier = max(tier_url, tier_txt)
-        slug = slug_url or slug_txt
-        link["_matched_slugs"] = [slug] if slug else []
-        link["_whitelist_tier"] = tier
-
-        # services-intent detection
-        services_hub_signal = _is_services_hub_or_child(href) or _query_contains_services(href) or _title_or_anchor_services(link)
-        # Stronger signal: exact 'services' anchor or title
-        title = (((link.get("head_data") or {}).get("title")) or "").strip().lower()
-        text = (link.get("text") or "").strip().lower()
-        if text == "services" or title == "services" or "\nservices\n" in text:
-            services_hub_signal = True
-
-        # base scores from Crawl4AI if present
-        intrinsic = link.get("intrinsic_score")
-        contextual = link.get("contextual_score")
-        total = link.get("total_score")
-        # Normalize fallback if needed
-        base_total = None
-        if isinstance(total, (int, float)):
-            base_total = float(total)
-        else:
-            # approximate from intrinsic (0..10) and contextual (0..1)
-            it = float(intrinsic) / 10.0 if isinstance(intrinsic, (int, float)) else 0.0
-            ct = float(contextual) if isinstance(contextual, (int, float)) else 0.0
-            base_total = 0.6 * ct + 0.4 * it
-
-        # thresholding (bypass for confirmed services hub or Tier1 via any channel)
-        if base_total < score_threshold and not (services_hub_signal or link.get("_whitelist_tier") == 1):
-            # Skip adding this candidate
+        if abs_href in seen:
+            continue
+        seen.add(abs_href)
+        if _is_service_area({"href": abs_href, "text": link.get("text", "")} if isinstance(link, dict) else {"href": abs_href, "text": ""}):
             continue
 
-        # boosts
-        boost = 0.0
-        if services_hub_signal:
-            boost += 0.30  # strong hub boost, inferred by path/query/title/anchor
-        tier = link.get("_whitelist_tier") or 0
-        if tier == 1:
-            boost += 0.20
-        elif tier == 2:
-            boost += 0.10
-        # slight negative boost for product catalogs when competing
-        if "/products" in (urlparse(href).path or "").lower():
-            boost -= 0.05
+        # Rule-first scoring only: category base + A-only boost
+        category, base_score, a_boost_flag, _cat_term = _category_for_link(abs_href, link if isinstance(link, dict) else {})
+        a_boost = 20 if (category == "A" and a_boost_flag) else 0
+        final_score = base_score + a_boost
 
-        final_score = max(0.0, min(1.0, base_total + boost))
-        bucket_idx, bucket_name = _bucket_priority_for_url(href, buckets)
+        # Whitelist-driven allowlist for top-level non-hub routes
+        path_len = _path_length(abs_href)
+        matched_slugs = list({_s for _s in (
+            *_matched_whitelist_slugs(abs_href), *_matched_whitelist_slugs((link.get("text") or "") if isinstance(link, dict) else "")
+        ) if _s})
+        is_top_level = path_len == 1
+        is_services_hub = path.startswith("/services")
+        if is_top_level and not is_services_hub and not matched_slugs:
+            # AIDEV-NOTE: Drop generic top-level routes like /solutions unless whitelisted
+            continue
 
         candidates.append({
-            "href": href,
-            "final_score": final_score,
-            "base_total": base_total,
-            "intrinsic_score": intrinsic,
-            "contextual_score": contextual,
-            "bucket_idx": bucket_idx,
-            "bucket": bucket_name,
-            "path_len": _path_length(href),
-            "matched_slugs": link.get("_matched_slugs", []),
-            "selection_reason": _build_selection_reason(href, base_total, boost, bucket_name, link.get("_matched_slugs", [])),
-            "_services_intent": services_hub_signal or (tier > 0),
+            "href": abs_href,
+            "final_score": float(final_score),
+            "path_len": path_len,
+            "matched_slugs": matched_slugs,
+            "selection_reason": f"score={final_score:.3f};path_len={path_len};matched={','.join(matched_slugs)}",
         })
 
-    # sort and select deterministically (prefer services intent in tie situations)
-    candidates.sort(key=lambda x: (
-        -x["final_score"],
-        0 if x.get("_services_intent") else 1,
-        x["bucket_idx"],
-        x["path_len"],
-        x["href"],
-    ))
-
+    candidates.sort(key=lambda x: (-x["final_score"], x["path_len"], x["href"]))
     selected: List[str] = []
     info_map: Dict[str, Dict[str, Any]] = {}
     for c in candidates:
@@ -344,67 +442,36 @@ def select_links_with_scoring(
             continue
         info_map[h] = c
         selected.append(h)
-
-    # Deterministic backfill if under cap
-    if len(selected) < cap:
-        remaining = [c for c in candidates if c["href"] not in info_map]
-        # prefer remaining services-intent first
-        remaining.sort(key=lambda x: (
-            0 if x.get("_services_intent") else 1,
-            x["bucket_idx"],
-            x["path_len"],
-            x["href"],
-        ))
-        for c in remaining:
-            if len(selected) >= cap:
-                break
-            h = c["href"]
-            info = info_map.get(h) or dict(c)
-            info["selection_reason"] = (info.get("selection_reason") or "") + (";" if info.get("selection_reason") else "") + ("backfill:" + info.get("bucket", ""))
-            info_map[h] = info
-            selected.append(h)
-
     return selected, info_map
 
 
-def _build_selection_reason(href: str, base_total: float, boost: float, bucket: str, matched_slugs: List[str]) -> str:
-    parts: List[str] = []
-    parts.append(f"base={base_total:.3f}")
-    if abs(boost) > 1e-6:
-        parts.append(f"boost={boost:+.2f}")
-    if bucket:
-        parts.append(f"bucket={bucket}")
-    if matched_slugs:
-        parts.append(f"slugs={','.join(matched_slugs)}")
-    return ";".join(parts)
+def apply_blog_news_rule(pages: Sequence[Dict[str, Any]], selection_info_map: Dict[str, Dict[str, Any]], *, contextual_threshold: float = 0.0) -> List[Dict[str, Any]]:
+    """
+    Keep at most one blog/news page, requiring either matched whitelist slugs or
+    detected keywords; ignore contextual scoring.
 
+    Args:
+        pages: Page records as produced by make_page_record.
+        selection_info_map: Diagnostics produced during selection.
+        contextual_threshold: Ignored (retained for signature stability).
 
-def apply_blog_news_rule(
-    pages: List[Dict[str, Any]],
-    selection_info_map: Dict[str, Dict[str, Any]],
-    *,
-    contextual_threshold: float,
-) -> List[Dict[str, Any]]:
-    """Keep at most one blog/news page if strong signals; otherwise remove.
-
-    Strong signals: contextual_score ≥ threshold and/or any matched_slugs.
-    Non-blog/news pages are always kept.
+    Returns:
+        Filtered list of page records with at most one blog/news page.
     """
     kept: List[Dict[str, Any]] = []
     blog_kept = False
     for p in pages:
-        url = (p.get("url") or "").lower()
-        is_blog = "/blog" in url or "/news" in url
+        url = p.get("url") or ""
+        low = url.lower()
+        is_blog = "/blog" in low or "/news" in low
         if not is_blog:
             kept.append(p)
             continue
-        if blog_kept:
-            continue
-        info = selection_info_map.get(p.get("url", ""), {})
-        ctx = info.get("contextual_score")
-        contextual_ok = isinstance(ctx, (int, float)) and float(ctx) >= contextual_threshold
+        info = selection_info_map.get(url, {})
+        # AIDEV-NOTE: Ignore contextual; rely on whitelist slugs or detected keywords only
         has_slug = bool(info.get("matched_slugs"))
-        if contextual_ok or has_slug or p.get("detected_keywords"):
+        has_detected = bool(p.get("detected_keywords"))
+        if not blog_kept and (has_slug or has_detected):
             kept.append(p)
             blog_kept = True
     return kept
