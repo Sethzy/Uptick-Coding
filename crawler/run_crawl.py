@@ -356,12 +356,36 @@ def main() -> int:
                         "selected_links": selected_links,
                     })
 
-                    # Crawl selected pages
+                    # Crawl selected pages, ensuring unique content pages up to cap
+                    homepage_hash = None
+                    try:
+                        import hashlib
+                        homepage_hash = hashlib.md5((homepage.get("markdown_fit") or "").encode("utf-8")).hexdigest()
+                    except Exception:
+                        homepage_hash = None
+
+                    content_hashes: set[str] = set([h for h in [homepage_hash] if h])
                     for link in selected_links:
                         try:
                             log_event(logger, "subpage_attempt", details={"domain": domain, "url": link})
                             r2 = await crawler.arun(url=link, config=run)
                             page_rec = make_page_record(link, r2, keywords=cfg.get("keywords", []))
+                            # Skip if content is empty
+                            content = page_rec.get("markdown_fit") or ""
+                            if not content.strip():
+                                log_event(logger, "subpage_skip_empty", details={"domain": domain, "url": link})
+                                continue
+                            # Skip if content matches homepage or already collected content
+                            try:
+                                import hashlib
+                                ch = hashlib.md5(content.encode("utf-8")).hexdigest()
+                            except Exception:
+                                ch = None
+                            if ch and ch in content_hashes:
+                                log_event(logger, "subpage_skip_duplicate_content", details={"domain": domain, "url": link})
+                                continue
+                            if ch:
+                                content_hashes.add(ch)
                             # Attach selection diagnostics if available
                             if link in selection_info_map:
                                 info = selection_info_map[link]
@@ -404,17 +428,17 @@ def main() -> int:
                                 blog_kept = True
                         pages = kept
 
-                    # De-duplicate by URL + normalized text to preserve distinct routes even if content overlaps
-                    seen_hashes = set()
+                    # Final dedupe by content only; keep the first instance for any repeated content
+                    seen_text_hashes = set()
                     deduped: List[Dict[str, Any]] = []
                     import hashlib
                     for p in pages:
-                        url_key = p.get("url") or ""
                         text = (p.get("markdown_fit") or "")
-                        h = hashlib.md5(f"{url_key}|{text}".encode("utf-8")).hexdigest()
-                        if h in seen_hashes:
+                        h = hashlib.md5(text.encode("utf-8")).hexdigest() if text else None
+                        if h and h in seen_text_hashes:
                             continue
-                        seen_hashes.add(h)
+                        if h:
+                            seen_text_hashes.add(h)
                         deduped.append(p)
                     pages = deduped
 
