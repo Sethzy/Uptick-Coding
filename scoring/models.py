@@ -23,20 +23,21 @@ from .schema import ModelClassification, get_model_classification_json_schema
 
 def _build_prompt(aggregated_context: str, prompt_version: str) -> str:
     schema_snippet = get_model_classification_json_schema()
+    # AIDEV-NOTE: Category definitions expanded (v2) for precision and disambiguation.
     user = (
         "Goal: Classify the company’s business mix and provide citations (URL + snippet). Include a confidence value.\n"
-        "Definitions:\n"
-        "- Classification categories:\n"
-        "  - \"Maintenance & Service Only\"\n"
-        "  - \"Install Focus\"\n"
-        "  - \"50/50 Split\"\n"
-        "  - \"Other\"\n"
+        "Definitions (be precise; base your decision on the ticket/project mix described in the context):\n"
+        "- Maintenance & Service Only: Companies focused exclusively on ongoing upkeep and repair of existing systems; recurring, mandated inspections; service calls, inspections, testing, preventative maintenance; small but frequent tickets; steady predictable revenue; do not typically handle new installs; indicators: high volume of recurring small-to-medium tickets and maintenance agreements.\n"
+        "- Install Focus: Primarily design and installation of new systems for new construction or major renovations; project-based; longer sales cycle; large, complex, multi-phase jobs with significant financial value; less frequent than service but much higher revenue per project; indicators: project-based work, blueprints/design focus, significant capex.\n"
+        "- 50/50 Split: Balanced mix of new installations and ongoing service/maintenance; can run large install projects while maintaining recurring service/inspection work; tickets show a mix of large multi-phase installs and smaller frequent service calls; indicators: roughly equal distribution of revenue or job count between installs and service.\n"
+        "- Other: Use only if evidence clearly does not support the three categories above. When selecting Other, also provide a concise sublabel (3-6 words, e.g., 'Security company') and a 2-3 sentence definition explaining it. Evidence must directly justify this sublabel.\n"
         "- Confidence: integer 0–100 indicating how sure you are about the assigned category.\n\n"
         "Schema:\n"
         f"{schema_snippet}\n\n"
         "Rules:\n"
         "- Provide at least 1 evidence item; up to 3.\n"
-        "- Snippets must be quoted from the provided text and include the source URL.\n"
+        "- Evidence snippets must be verbatim quotes from the provided text and include the source URL from headers.\n"
+        "- When category is 'Other', ensure the evidence specifically supports the sublabel you propose.\n"
         "- Temperature: 0. Output JSON only.\n\n"
         "Context (Aggregated):\n"
         f"{aggregated_context}"

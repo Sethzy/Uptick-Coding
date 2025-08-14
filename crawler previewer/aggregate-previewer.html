@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<!--
+  Purpose: Minimal in-browser previewer for company aggregated content.
+  Description: This HTML reads JSONL records from `10-sample-confirmation/output.jsonl`,
+  parses each line, and renders the `aggregated_context` field as Markdown. A single
+  "Next" button cycles through companies in a loop. Intended for internal use only.
+  Key Functions/Sections: loadData (fetch/parse JSONL), renderCurrent (Markdown render), next (advance index).
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Output.jsonl Previewer</title>
+    <link rel="preconnect" href="https://unpkg.com" />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        line-height: 1.45;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        background: Canvas;
+        border-bottom: 1px solid rgb(0 0 0 / 10%);
+        padding: 14px 16px;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      h1 {
+        margin: 0;
+        font-size: 20px;
+      }
+      .muted {
+        opacity: 0.7;
+        font-size: 13px;
+      }
+      main {
+        padding: 16px;
+      }
+      .card {
+        border: 1px solid rgb(0 0 0 / 12%);
+        border-radius: 12px;
+        background: Canvas;
+        overflow: hidden;
+      }
+      .card header {
+        position: static;
+        border-bottom: 1px solid rgb(0 0 0 / 10%);
+        padding: 10px 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .title {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .domain {
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .index {
+        font-variant-numeric: tabular-nums;
+      }
+      .content {
+        padding: 12px 14px;
+        max-height: calc(100vh - 220px);
+        overflow: auto;
+      }
+      button {
+        font: inherit;
+        padding: 8px 10px;
+        border: 1px solid rgb(0 0 0 / 20%);
+        border-radius: 8px;
+        background: Field;
+        color: FieldText;
+        cursor: pointer;
+      }
+      .urls {
+        margin: 8px 0 0;
+        font-size: 12.5px;
+      }
+      .urls code {
+        opacity: 0.9;
+      }
+      .rendered :is(h1, h2, h3) {
+        margin-top: 1.2em;
+      }
+      .rendered img {
+        max-width: 100%;
+        height: auto;
+      }
+      .rendered blockquote {
+        border-left: 4px solid rgb(0 0 0 / 15%);
+        margin: 8px 0;
+        padding: 4px 10px;
+        opacity: 0.9;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Aggregate previewer</h1>
+      <div
+        style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap"
+      >
+        <div class="muted">
+          Source:
+          <code id="sourceLabel">(no file)</code>
+        </div>
+        <input
+          type="file"
+          id="fileInput"
+          accept=".json,.jsonl"
+          style="display: none"
+        />
+        <button id="openBtn" title="Open JSON/JSONL file">Open file</button>
+        <button id="configBtn" title="Configure field mappings">
+          Configure
+        </button>
+      </div>
+    </header>
+    <main>
+      <section class="card">
+        <header>
+          <div class="title">
+            <div class="domain" id="domain">—</div>
+            <div class="muted">
+              <span class="index" id="indexLabel">0 / 0</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center">
+            <button id="nextBtn" title="Next company">Next ▶</button>
+          </div>
+        </header>
+        <div class="content">
+          <div class="rendered" id="md"></div>
+          <div class="urls" id="urls"></div>
+        </div>
+      </section>
+      <!-- Minimal config panel -->
+      <section
+        id="configPanel"
+        class="card"
+        style="margin-top: 12px; display: none"
+      >
+        <header>
+          <div class="title">
+            <div class="domain">Configure field mappings</div>
+            <div class="muted">Detected keys can be overridden below</div>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center">
+            <button id="applyConfig">Apply</button>
+          </div>
+        </header>
+        <div class="content" style="display: flex; gap: 12px; flex-wrap: wrap">
+          <label
+            >Label key
+            <select id="labelKey"></select>
+          </label>
+          <label
+            >Markdown key
+            <select id="markdownKey"></select>
+          </label>
+          <label
+            >URLs key
+            <select id="urlsKey"></select>
+          </label>
+        </div>
+      </section>
+    </main>
+
+    <!-- Marked for Markdown rendering -->
+    <script src="https://unpkg.com/marked@12/marked.min.js"></script>
+    <script>
+      // Minimal inline helpers
+      function parseJsonOrJsonl(text) {
+        const trimmed = String(text || "").trim();
+        if (!trimmed) return [];
+        const first = trimmed[0];
+        if (first === "{" || first === "[") {
+          try {
+            const parsed = JSON.parse(trimmed);
+            return Array.isArray(parsed) ? parsed : [parsed];
+          } catch {}
+        }
+        return trimmed
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .map((line) => {
+            try {
+              return JSON.parse(line);
+            } catch {
+              return null;
+            }
+          })
+          .filter((x) => x && typeof x === "object");
+      }
+      function detectKey(candidates, obj) {
+        if (!obj || typeof obj !== "object") return null;
+        const lowerToKey = Object.keys(obj).reduce((acc, k) => {
+          acc[k.toLowerCase()] = k;
+          return acc;
+        }, {});
+        for (const cand of candidates) {
+          const found = lowerToKey[cand.toLowerCase()];
+          if (found) return found;
+        }
+        return null;
+      }
+      function detectAggregateMappings(record) {
+        const labelKey =
+          detectKey(["domain", "label", "name", "company", "title"], record) ||
+          null;
+        const markdownKey =
+          detectKey(
+            ["aggregated_context", "markdown", "content", "body", "text"],
+            record
+          ) || "aggregated_context";
+        const urlsKey = detectKey(["included_urls", "urls", "links"], record);
+        return { labelKey, markdownKey, urlsKey };
+      }
+      function unionObjectKeys(records, limit = 200) {
+        const keys = new Set();
+        for (let i = 0; i < Math.min(records.length, limit); i++) {
+          const r = records[i];
+          if (r && typeof r === "object")
+            Object.keys(r).forEach((k) => keys.add(k));
+        }
+        return Array.from(keys);
+      }
+      function saveMapping(kind, sourceKey, mapping) {
+        try {
+          localStorage.setItem(
+            `previewer:mapping:${kind}:${sourceKey}`,
+            JSON.stringify(mapping)
+          );
+        } catch {}
+      }
+      function loadMapping(kind, sourceKey) {
+        try {
+          const raw = localStorage.getItem(
+            `previewer:mapping:${kind}:${sourceKey}`
+          );
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      }
+      function wireGlobalDropZone(onFileText) {
+        const prevent = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        };
+        window.addEventListener("dragover", prevent);
+        window.addEventListener("dragenter", prevent);
+        window.addEventListener("drop", async (e) => {
+          prevent(e);
+          const file = e.dataTransfer?.files?.[0];
+          if (!file) return;
+          try {
+            const text = await file.text();
+            onFileText(text, file.name || "dropped.jsonl");
+          } catch (err) {
+            console.error(err);
+          }
+        });
+      }
+      /*
+       * Purpose: Minimal previewer for output.jsonl records.
+       * Description: Loads JSONL of company records and renders `aggregated_context` as Markdown.
+       * Key Functions: loadData, renderCurrent, next.
+       */
+      // AIDEV-NOTE: Keep minimal; single Next button cycles entries (wrap-around)
+      // AIDEV-NOTE: JSONL schema keys used: domain, aggregated_context, included_urls
+
+      const state = {
+        items: [],
+        i: 0,
+        mapping: {
+          labelKey: null,
+          markdownKey: "aggregated_context",
+          urlsKey: null,
+        },
+        sourceKey: "session",
+        keys: [],
+      };
+
+      function el(id) {
+        return document.getElementById(id);
+      }
+
+      // No default loading; rely on drop or file open
+
+      function applyLoadedText(text, filename) {
+        const items = parseJsonOrJsonl(text);
+        if (!Array.isArray(items) || items.length === 0) {
+          throw new Error("No records found in file");
+        }
+        state.items = items;
+        state.i = 0;
+        state.sourceKey = filename ? `file:${filename}` : state.sourceKey;
+        state.keys = unionObjectKeys(items);
+        const saved = loadMapping("aggregate", state.sourceKey);
+        if (saved) state.mapping = saved;
+        else state.mapping = { ...detectAggregateMappings(items[0]) };
+        el("sourceLabel").textContent = filename || "(in-memory)";
+        buildConfigPanel();
+      }
+
+      function renderCurrent() {
+        const { items, i } = state;
+        const item = items[i];
+        const label = state.mapping.labelKey
+          ? item[state.mapping.labelKey]
+          : item.domain;
+        el("domain").textContent = label || "(no label)";
+        el("indexLabel").textContent = `${i + 1} / ${items.length}`;
+
+        const md = item[state.mapping.markdownKey] || "(no markdown)";
+        try {
+          el("md").innerHTML = marked.parse(md);
+        } catch (e) {
+          el("md").innerHTML = `<pre>${md.replace(
+            /[&<>]/g,
+            (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])
+          )}</pre>`;
+        }
+
+        const urls = Array.isArray(
+          state.mapping.urlsKey
+            ? item[state.mapping.urlsKey]
+            : item.included_urls
+        )
+          ? state.mapping.urlsKey
+            ? item[state.mapping.urlsKey]
+            : item.included_urls
+          : [];
+        el("urls").innerHTML = urls.length
+          ? `Included URLs (${urls.length}): ` +
+            urls.map((u) => `<code>${escapeHtml(u)}</code>`).join(" \u2022 ")
+          : "";
+      }
+
+      function next() {
+        state.i = (state.i + 1) % state.items.length;
+        renderCurrent();
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            }[c])
+        );
+      }
+
+      (async function init() {
+        try {
+          wireGlobalDropZone((text, name) => {
+            try {
+              applyLoadedText(text, name);
+              renderCurrent();
+            } catch (e) {
+              showError(e);
+            }
+          });
+          el("openBtn").addEventListener("click", () =>
+            el("fileInput").click()
+          );
+          el("fileInput").addEventListener("change", async (e) => {
+            const f = e.target.files?.[0];
+            if (!f) return;
+            const text = await f.text();
+            applyLoadedText(text, f.name);
+            renderCurrent();
+          });
+          el("configBtn").addEventListener("click", () => {
+            const p = el("configPanel");
+            p.style.display = p.style.display === "none" ? "block" : "none";
+          });
+          el("applyConfig").addEventListener("click", () => {
+            const labelKey = el("labelKey").value || null;
+            const markdownKey =
+              el("markdownKey").value || state.mapping.markdownKey;
+            const urlsKey = el("urlsKey").value || null;
+            state.mapping = { labelKey, markdownKey, urlsKey };
+            saveMapping("aggregate", state.sourceKey, state.mapping);
+            renderCurrent();
+          });
+          el("nextBtn").addEventListener("click", next);
+        } catch (err) {
+          showError(err);
+        }
+      })();
+
+      function buildConfigPanel() {
+        const keys = state.keys.length
+          ? state.keys
+          : Object.keys(state.items[0] || {});
+        function fillSelect(id, current, allowEmpty = true) {
+          const sel = el(id);
+          sel.innerHTML = "";
+          if (allowEmpty) {
+            const opt = document.createElement("option");
+            opt.value = "";
+            opt.textContent = "(none)";
+            sel.appendChild(opt);
+          }
+          keys.forEach((k) => {
+            const opt = document.createElement("option");
+            opt.value = k;
+            opt.textContent = k;
+            sel.appendChild(opt);
+          });
+          sel.value = current || "";
+        }
+        fillSelect("labelKey", state.mapping.labelKey, true);
+        fillSelect("markdownKey", state.mapping.markdownKey, false);
+        fillSelect("urlsKey", state.mapping.urlsKey, true);
+      }
+
+      function showError(err) {
+        document.body.innerHTML = `<pre style="padding:16px">${String(
+          err
+        )}</pre>`;
+        console.error(err);
+      }
+    </script>
+  </body>
+</html>

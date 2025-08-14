@@ -39,6 +39,8 @@ def _flatten_for_csv(domain: str, result: Dict[str, Any]) -> Dict[str, Any]:
         "classification_category": result.get("classification_category", ""),
         "confidence": result.get("confidence", ""),
         "rationale": result.get("rationale", ""),
+        "other_sublabel": result.get("other_sublabel", ""),
+        "other_sublabel_definition": result.get("other_sublabel_definition", ""),
         "model_name": result.get("model_name", ""),
         "prompt_version": result.get("prompt_version", ""),
         "run_id": result.get("run_id", ""),
@@ -94,6 +96,12 @@ async def _classify_one_async(
             "rationale": parsed.rationale,
             "evidence": [],
         })
+        if parsed.classification_category == "Other":
+            # Include sublabel details for transparency even when evidence invalid
+            base.update({
+                "other_sublabel": getattr(parsed, "other_sublabel", None),
+                "other_sublabel_definition": getattr(parsed, "other_sublabel_definition", None),
+            })
         return base
 
     base.update({
@@ -103,6 +111,11 @@ async def _classify_one_async(
         "rationale": parsed.rationale,
         "evidence": valid_evidence,
     })
+    if parsed.classification_category == "Other":
+        base.update({
+            "other_sublabel": getattr(parsed, "other_sublabel", None),
+            "other_sublabel_definition": getattr(parsed, "other_sublabel_definition", None),
+        })
     return base
 
 
@@ -167,17 +180,18 @@ def score_file(
                 # Default checkpoint alongside outputs with a descriptive name
                 ckpt_path = Path(output_jsonl).with_name("processed-domains.ckpt") if output_jsonl else None
             processed: Set[str] = _load_checkpoint(ckpt_path) if ckpt_path else set()
-            items: List[Tuple[str, str]] = []
+            items: List[Tuple[str, str, str]] = []
             for obj in _iter_jsonl(input_jsonl):
                 d = obj.get("domain", "")
                 if ckpt_path and d in processed:
                     continue
-                items.append((d, obj.get("aggregated_context", "")))
+                rid = str(obj.get("record_id", "")) if obj.get("record_id") is not None else ""
+                items.append((d, obj.get("aggregated_context", ""), rid))
 
             sem = asyncio.Semaphore(max(1, int(worker_count)))
             write_lock = asyncio.Lock()
 
-            async def _run_one(d: str, ctx: str) -> None:
+            async def _run_one(d: str, ctx: str, rid: str) -> None:
                 async with sem:
                     logger.log("classify.start", domain=d, run_id=run_id, model=cfg.model, prompt_version=prompt_version)
                     result = await _classify_one_async(
@@ -186,13 +200,20 @@ def score_file(
                     logger.log("classify.end", domain=d, run_id=run_id, status=result.get("status"), error=result.get("error"))
                     async with write_lock:
                         if output_jsonl:
-                            append_jsonl(output_jsonl, result)
+                            # Carry through record_id if present on input aggregated JSONL
+                            result_with_id = dict(result)
+                            if rid:
+                                result_with_id["record_id"] = rid
+                            append_jsonl(output_jsonl, result_with_id)
                         if output_csv:
-                            append_csv_row(output_csv, _flatten_for_csv(d, result))
+                            row = _flatten_for_csv(d, result)
+                            if rid:
+                                row["record_id"] = rid
+                            append_csv_row(output_csv, row)
                         if ckpt_path:
                             _append_checkpoint(ckpt_path, d)
 
-            await asyncio.gather(*[ _run_one(d, c) for d, c in items ])
+            await asyncio.gather(*[ _run_one(d, c, r) for d, c, r in items ])
 
     asyncio.run(_inner())
 

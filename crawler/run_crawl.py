@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover
         return False
 
 from .logging import get_logger, log_event, log_progress, log_summary
-from .reachability import load_domains_from_csv
+from .reachability import load_domains_from_csv, load_domain_id_pairs_from_csv
 from .session import stable_session_id
 from .canonical import canonicalize_domain, is_robot_disallowed
 from .politeness import jitter_delay_seconds
@@ -83,6 +83,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--column", default=os.getenv("DOMAIN_COLUMN", "tam_site"), help="CSV column to read domains from (default: tam_site)")
+    parser.add_argument("--id-column", default=os.getenv("ID_COLUMN", "Record ID"), help="CSV column name for stable record ID to carry through outputs")
     parser.add_argument("--robots", choices=["respect", "ignore", "auto"], default=os.getenv("ROBOTS_MODE", "auto"), help="Robots handling: respect, ignore, or auto (use config)")
     args = parser.parse_args()
 
@@ -91,9 +92,13 @@ def main() -> int:
     with open(cfg_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
 
-    # Load domains
+    # Load domains and optional record IDs
     try:
-        all_domains = load_domains_from_csv(args.input_csv, column=args.column)
+        # Prefer domain+id pairs to preserve 1:1 mapping to input rows
+        domain_id_pairs = load_domain_id_pairs_from_csv(
+            args.input_csv, domain_column=args.column, id_column=args.id_column
+        )
+        all_domains = [d for d, _rid in domain_id_pairs]
     except Exception as e:
         logger.info(f"Failed to load CSV: {e}")
         return 1
@@ -174,12 +179,15 @@ def main() -> int:
                     return (_approx_tokens(total_chars + len(next_text)) > max_tokens)
                 return False
 
+            # AIDEV-NOTE: Aggregation order policy
+            # - Homepage: use markdown_fit (default generator output; links stripped)
+            # - Subpages: use markdown_scoped (DOM-scoped, links/images stripped)
             for idx, p in enumerate(ordered):
                 url_val = p.get("url") or ""
                 if idx == 0:
-                    raw_text = p.get("markdown_scoped") or ""
-                else:
                     raw_text = p.get("markdown_fit") or ""
+                else:
+                    raw_text = p.get("markdown_scoped") or ""
                 norm = _normalize_page_text(raw_text)
                 if not norm:
                     continue
@@ -218,6 +226,8 @@ def main() -> int:
 
                 async def crawl_one(domain: str) -> None:
                     nonlocal ok, fail, retry, failure_reasons
+                    # Lookup the first matching record_id for this domain from the input pairs
+                    record_id = next((rid for d, rid in domain_id_pairs if d == domain), "")
                     if args.resume and cp.get(domain) == -1:
                         return
                     start_ms = time.time()
@@ -239,6 +249,7 @@ def main() -> int:
                         # Write raw record (failure)
                         raw_rec = {
                             "domain": domain,
+                            "record_id": record_id,
                             "canonical_url": "",
                             "crawler_status": "FAIL",
                             "crawler_reason": reason,
@@ -250,6 +261,7 @@ def main() -> int:
 
                         agg_rec = {
                             "domain": domain,
+                            "record_id": record_id,
                             "aggregated_context": "",
                             "included_urls": [],
                             "overflow": False,
@@ -281,6 +293,7 @@ def main() -> int:
                         reason = "ROBOT_DISALLOW"
                         raw_rec = {
                             "domain": domain,
+                            "record_id": record_id,
                             "canonical_url": canonical_url,
                             "crawler_status": "SKIPPED",
                             "crawler_reason": reason,
@@ -292,6 +305,7 @@ def main() -> int:
 
                         agg_rec = {
                             "domain": domain,
+                            "record_id": record_id,
                             "aggregated_context": "",
                             "included_urls": [],
                             "overflow": False,
@@ -358,6 +372,7 @@ def main() -> int:
                         reason = "TIMEOUT"
                         raw_rec = {
                             "domain": domain,
+                            "record_id": record_id,
                             "canonical_url": canonical_url,
                             "crawler_status": "FAIL",
                             "crawler_reason": reason,
@@ -369,6 +384,7 @@ def main() -> int:
 
                         agg_rec = {
                             "domain": domain,
+                            "record_id": record_id,
                             "aggregated_context": "",
                             "included_urls": [],
                             "overflow": False,
@@ -565,6 +581,7 @@ def main() -> int:
                         reason = "EMPTY_CONTENT"
                         raw_rec = {
                             "domain": domain,
+                            "record_id": record_id,
                             "canonical_url": canonical_url,
                             "crawler_status": "FAIL",
                             "crawler_reason": reason,
@@ -576,6 +593,7 @@ def main() -> int:
 
                         agg_rec = {
                             "domain": domain,
+                            "record_id": record_id,
                             "aggregated_context": "",
                             "included_urls": [],
                             "overflow": False,
@@ -609,6 +627,7 @@ def main() -> int:
                     # Write raw detailed record
                     raw_rec = {
                         "domain": domain,
+                        "record_id": record_id,
                         "canonical_url": canonical_url,
                         "crawler_status": "OK" if getattr(result, "success", True) else "FAIL",
                         "crawler_reason": "" if getattr(result, "success", True) else (getattr(result, "error_message", None) or "UNKNOWN"),
@@ -620,6 +639,8 @@ def main() -> int:
 
                     # Write aggregated record
                     agg_rec = _build_aggregated_record(domain, pages, max_tokens=max_tokens_cfg, max_chars=max_chars_cfg)
+                    # Attach record_id to aggregated output
+                    agg_rec["record_id"] = record_id
                     write_record(agg_fh, agg_rec)
                     ok += 1
                     elapsed_ms = int((time.time() - start_ms) * 1000)

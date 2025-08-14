@@ -48,10 +48,12 @@ def trim_snippet(snippet: str, max_len: int = 320) -> str:
     sentence_match = re.search(r"[.!?](?=[^.!?]*$)", slice_text)
     if sentence_match and sentence_match.end() <= max_len:
         return slice_text[: sentence_match.end()].strip()
-    # Fallback to last whitespace
-    last_space = slice_text.rfind(" ")
+    # Fallback to last whitespace at or before max_len-1 so including the space keeps len <= max_len
+    window = slice_text[:max_len]
+    last_space = window.rfind(" ")
     if last_space > 0:
-        return slice_text[:last_space].strip()
+        # Include the space so the boundary ends with whitespace as expected by tests/PRD
+        return window[: last_space + 1]
     # Hard cut
     return snippet[:max_len].strip()
 

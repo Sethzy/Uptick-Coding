@@ -12,10 +12,13 @@ from typing import Dict, List, Any
 
 
 COLUMNS: List[str] = [
+    "record_id",
     "domain",
     "classification_category",
     "confidence",
     "rationale",
+    "other_sublabel",
+    "other_sublabel_definition",
     "evidence_url_1",
     "evidence_snippet_1",
     "evidence_url_2",

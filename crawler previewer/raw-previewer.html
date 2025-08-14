@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Markdown Comparison UI</title>
+    <link rel="preconnect" href="https://unpkg.com" />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        line-height: 1.4;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        background: Canvas;
+        border-bottom: 1px solid rgb(0 0 0 / 10%);
+        padding: 16px;
+        z-index: 10;
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 28px;
+      }
+      .sub {
+        margin: 0 0 16px 0;
+        opacity: 0.75;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      select,
+      button {
+        font: inherit;
+        padding: 8px 10px;
+        border: 1px solid rgb(0 0 0 / 20%);
+        border-radius: 8px;
+        background: Field;
+        color: FieldText;
+      }
+      main {
+        padding: 16px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      @media (max-width: 1100px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .card {
+        border: 1px solid rgb(0 0 0 / 12%);
+        border-radius: 12px;
+        background: Canvas;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        min-height: 200px;
+      }
+      .card h2 {
+        margin: 0;
+        padding: 12px 14px;
+        border-bottom: 1px solid rgb(0 0 0 / 10%);
+        font-size: 20px;
+      }
+      .card .content {
+        padding: 12px 14px;
+        overflow: auto;
+        max-height: calc(100vh - 240px);
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        font-size: 12.5px;
+      }
+      .muted {
+        opacity: 0.65;
+        font-size: 13px;
+      }
+      .foot {
+        margin-top: 8px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .pill {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: color-mix(in oklab, CanvasText 10%, Canvas 90%);
+        font-size: 12px;
+        opacity: 0.8;
+      }
+      .sr-only {
+        position: absolute;
+        left: -9999px;
+      }
+      .rendered :is(h1, h2, h3) {
+        margin-top: 1.2em;
+      }
+      .rendered img {
+        max-width: 100%;
+        height: auto;
+      }
+      .rendered blockquote {
+        border-left: 4px solid rgb(0 0 0 / 15%);
+        margin: 8px 0;
+        padding: 4px 10px;
+        opacity: 0.9;
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Raw-output Markdown Preview</h1>
+      <p class="sub">
+        A side-by-side comparison of the different markdown formats.
+      </p>
+      <div class="row" style="gap: 8px; align-items: center">
+        <label for="pageSelect"><strong>Select Company:</strong></label>
+        <select id="pageSelect" aria-label="Select page"></select>
+        <span class="pill" id="statsPill" aria-live="polite"></span>
+        <span class="muted" id="hint"
+          >Rendering only applies to "Markdown Fit".</span
+        >
+      </div>
+      <div class="row" style="gap: 8px; align-items: center; margin-top: 8px">
+        <div class="muted">
+          Source:
+          <code id="sourceLabel">(no file)</code>
+        </div>
+        <input
+          type="file"
+          id="fileInput"
+          accept=".json,.jsonl"
+          style="display: none"
+        />
+        <button id="openBtn" title="Open JSON/JSONL file">Open file</button>
+        <button id="configBtn" title="Configure field mappings">
+          Configure
+        </button>
+      </div>
+    </header>
+    <main>
+      <section class="grid">
+        <article class="card">
+          <h2>Markdown Scoped</h2>
+          <div class="content">
+            <pre id="scopedText"></pre>
+            <div class="foot">
+              <span class="muted">Key: <code>markdown_scoped</code></span>
+              <div class="toolbar">
+                <button id="copyScoped">Copy</button>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Markdown Fit (Rendered)</h2>
+          <div class="content rendered" id="fitRendered"></div>
+          <div class="foot" style="padding: 0 14px 12px">
+            <span class="muted">Key: <code>markdown_fit</code></span>
+            <div class="toolbar">
+              <button id="copyFit">Copy source</button>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Raw Markdown</h2>
+          <div class="content">
+            <pre id="rawText"></pre>
+            <div class="foot">
+              <span class="muted">Key: <code>markdown_raw</code></span>
+              <div class="toolbar">
+                <button id="copyRaw">Copy</button>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+      <!-- Minimal config panel -->
+      <section
+        id="configPanel"
+        class="card"
+        style="margin-top: 12px; display: none"
+      >
+        <h2>Configure field mappings</h2>
+        <div class="content" style="display: flex; gap: 12px; flex-wrap: wrap">
+          <label
+            >Pages key
+            <select id="pagesKey"></select>
+          </label>
+          <label
+            >Title key
+            <select id="titleKey"></select>
+          </label>
+          <label
+            >URL key
+            <select id="urlKey"></select>
+          </label>
+          <label
+            >Fit key
+            <select id="fitKey"></select>
+          </label>
+          <label
+            >Scoped key
+            <select id="scopedKey"></select>
+          </label>
+          <label
+            >Raw key
+            <select id="rawKey"></select>
+          </label>
+        </div>
+        <div style="padding: 0 14px 12px">
+          <button id="applyConfig">Apply</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Marked for rendering markdown_fit -->
+    <script src="https://unpkg.com/marked@12/marked.min.js"></script>
+    <script>
+      // Minimal inline helpers (no external utils)
+      function parseJsonOrJsonl(text) {
+        const trimmed = String(text || "").trim();
+        if (!trimmed) return [];
+        const first = trimmed[0];
+        if (first === "{" || first === "[") {
+          try {
+            const parsed = JSON.parse(trimmed);
+            return Array.isArray(parsed) ? parsed : [parsed];
+          } catch {}
+        }
+        return trimmed
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .map((line) => {
+            try {
+              return JSON.parse(line);
+            } catch {
+              return null;
+            }
+          })
+          .filter((x) => x && typeof x === "object");
+      }
+      function unionObjectKeys(records, limit = 200) {
+        const keys = new Set();
+        for (let i = 0; i < Math.min(records.length, limit); i++) {
+          const r = records[i];
+          if (r && typeof r === "object")
+            Object.keys(r).forEach((k) => keys.add(k));
+        }
+        return Array.from(keys);
+      }
+      function detectKey(candidates, obj) {
+        if (!obj || typeof obj !== "object") return null;
+        const lowerToKey = Object.keys(obj).reduce((acc, k) => {
+          acc[k.toLowerCase()] = k;
+          return acc;
+        }, {});
+        for (const cand of candidates) {
+          const found = lowerToKey[cand.toLowerCase()];
+          if (found) return found;
+        }
+        return null;
+      }
+      function detectPagesMappings(record) {
+        const pagesKey =
+          detectKey(
+            ["pages", "items", "docs", "documents", "entries"],
+            record
+          ) || "pages";
+        const sample = Array.isArray(record?.[pagesKey])
+          ? record[pagesKey][0]
+          : null;
+        const fitKey = detectKey(["markdown_fit", "fit", "md_fit"], sample);
+        const scopedKey = detectKey(
+          ["markdown_scoped", "scoped", "md_scoped"],
+          sample
+        );
+        const rawKey =
+          detectKey(["markdown_raw", "raw", "md_raw", "markdown"], sample) ||
+          (sample && typeof sample.markdown === "string"
+            ? "markdown"
+            : undefined);
+        const titleKey = detectKey(["title", "name"], sample) || "title";
+        const urlKey = detectKey(["url", "link", "href"], sample) || "url";
+        return { pagesKey, fitKey, scopedKey, rawKey, titleKey, urlKey };
+      }
+      function saveMapping(kind, sourceKey, mapping) {
+        try {
+          localStorage.setItem(
+            `previewer:mapping:${kind}:${sourceKey}`,
+            JSON.stringify(mapping)
+          );
+        } catch {}
+      }
+      function loadMapping(kind, sourceKey) {
+        try {
+          const raw = localStorage.getItem(
+            `previewer:mapping:${kind}:${sourceKey}`
+          );
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      }
+      function wireGlobalDropZone(onFileText) {
+        const prevent = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        };
+        window.addEventListener("dragover", prevent);
+        window.addEventListener("dragenter", prevent);
+        window.addEventListener("drop", async (e) => {
+          prevent(e);
+          const file = e.dataTransfer?.files?.[0];
+          if (!file) return;
+          try {
+            const text = await file.text();
+            onFileText(text, file.name || "dropped.jsonl");
+          } catch (err) {
+            console.error(err);
+          }
+        });
+      }
+
+      const state = {
+        data: [],
+        currentIndex: 0,
+        mapping: {
+          pagesKey: "pages",
+          titleKey: "title",
+          urlKey: "url",
+          fitKey: undefined,
+          scopedKey: "markdown_scoped",
+          rawKey: "markdown_raw",
+        },
+        sourceKey: "session",
+        keys: [],
+        pageItemKeys: [],
+      };
+      let recordsCache = [];
+
+      function applyLoadedText(text, filename) {
+        const records = parseJsonOrJsonl(text);
+        if (!records.length) throw new Error("No records found in file");
+        recordsCache = records;
+        window.__recordsCache = records;
+        state.sourceKey = filename ? `file:${filename}` : state.sourceKey;
+        state.keys = unionObjectKeys(records);
+        const detected = detectPagesMappings(records[0] || {});
+        const saved = loadMapping("raw", state.sourceKey);
+        state.mapping = saved || { ...detected };
+        el("sourceLabel").textContent = filename || "(in-memory)";
+        // Build page item keys from first page
+        const pages = Array.isArray(records[0]?.[state.mapping.pagesKey])
+          ? records[0][state.mapping.pagesKey]
+          : [];
+        state.pageItemKeys = unionObjectKeys(pages);
+        buildConfigPanel();
+        state.data = buildCompaniesFromRecords(records);
+      }
+
+      function buildCompaniesFromRecords(records) {
+        const m = state.mapping;
+        const companies = records.map((rec) => {
+          const pages = Array.isArray(rec?.[m.pagesKey]) ? rec[m.pagesKey] : [];
+
+          const scopedParts = [];
+          const rawParts = [];
+          const fitParts = [];
+          for (let i = 0; i < pages.length; i++) {
+            const p = pages[i] || {};
+            const idx = i + 1;
+            const title = (m.titleKey && p[m.titleKey]) || "";
+            const url = (m.urlKey && p[m.urlKey]) || "";
+
+            const asciiHeader = `\n\n================ [PAGE ${idx}] ================\n`;
+            const asciiMeta = `${title ? title + "\n" : ""}${
+              url ? url + "\n" : ""
+            }`;
+
+            const scopedVal = m.scopedKey ? p[m.scopedKey] : undefined;
+            const rawVal = m.rawKey ? p[m.rawKey] : undefined;
+            const fitVal = m.fitKey ? p[m.fitKey] : undefined;
+
+            scopedParts.push(`${asciiHeader}${asciiMeta}\n${scopedVal || ""}`);
+            rawParts.push(`${asciiHeader}${asciiMeta}\n${rawVal || ""}`);
+
+            const fitContent =
+              (typeof fitVal === "string" && fitVal.length
+                ? fitVal
+                : undefined) ??
+              (typeof scopedVal === "string" && scopedVal.length
+                ? scopedVal
+                : undefined) ??
+              (typeof rawVal === "string" && rawVal.length ? rawVal : "");
+            const urlMd = url ? `\n${url}` : "";
+            fitParts.push(
+              `\n\n---\n\n### [PAGE ${idx}] ${
+                title || ""
+              }${urlMd}\n\n${fitContent}`
+            );
+          }
+
+          const scoped = scopedParts.join("\n");
+          const raw = rawParts.join("\n");
+          const fit = fitParts.join("\n");
+
+          let label = rec?.domain || "";
+          if (!label) {
+            const firstUrl =
+              pages?.[0]?.[state.mapping.urlKey] || rec?.canonical_url || "";
+            try {
+              if (firstUrl) label = new URL(firstUrl).hostname || firstUrl;
+            } catch {
+              label =
+                firstUrl || pages?.[0]?.[state.mapping.titleKey] || "Company";
+            }
+          }
+
+          return {
+            label,
+            markdown_scoped: scoped || "",
+            markdown_raw: raw || "",
+            markdown_fit: fit || "",
+            pagesCount: pages.length || 0,
+          };
+        });
+
+        if (!Array.isArray(companies) || companies.length === 0)
+          throw new Error("No companies found in data");
+
+        return companies;
+      }
+
+      function el(id) {
+        return document.getElementById(id);
+      }
+
+      function updateStats(item) {
+        const scopedLen = (item.markdown_scoped || "").length;
+        const fitLen = (item.markdown_fit || "").length;
+        const rawLen = (item.markdown_raw || "").length;
+        el("statsPill").textContent = `Pages: ${Number(
+          item.pagesCount || 0
+        )} • Scoped: ${scopedLen.toLocaleString()} • Fit: ${fitLen.toLocaleString()} • Raw: ${rawLen.toLocaleString()}`;
+      }
+
+      function render(index) {
+        const item = state.data[index];
+        state.currentIndex = index;
+
+        // Populate text panels
+        el("scopedText").textContent = item.markdown_scoped || "";
+        el("rawText").textContent = item.markdown_raw || "";
+
+        // Render markdown_fit
+        const fit = item.markdown_fit || "";
+        try {
+          el("fitRendered").innerHTML = marked.parse(fit);
+        } catch (e) {
+          el("fitRendered").innerHTML = `<pre>${fit.replace(
+            /[&<>]/g,
+            (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])
+          )}</pre>`;
+        }
+
+        updateStats(item);
+      }
+
+      function populateSelect() {
+        const select = el("pageSelect");
+        select.innerHTML = "";
+        state.data.forEach((item, idx) => {
+          const opt = document.createElement("option");
+          const label =
+            item.label || item.title || item.url || `Company ${idx + 1}`;
+          opt.value = String(idx);
+          opt.textContent = label;
+          select.appendChild(opt);
+        });
+        select.value = "0";
+        select.addEventListener("change", (e) =>
+          render(Number(e.target.value))
+        );
+      }
+
+      function wireCopyButtons() {
+        el("copyScoped").addEventListener("click", async () => {
+          const txt = state.data[state.currentIndex]?.markdown_scoped || "";
+          await navigator.clipboard.writeText(txt);
+        });
+        el("copyFit").addEventListener("click", async () => {
+          const txt = state.data[state.currentIndex]?.markdown_fit || "";
+          await navigator.clipboard.writeText(txt);
+        });
+        el("copyRaw").addEventListener("click", async () => {
+          const txt = state.data[state.currentIndex]?.markdown_raw || "";
+          await navigator.clipboard.writeText(txt);
+        });
+      }
+
+      function buildConfigPanel() {
+        const recKeys = state.keys.length ? state.keys : [];
+        const pageKeys = state.pageItemKeys.length ? state.pageItemKeys : [];
+        function select(id, keys, current, allowEmpty = false) {
+          const sel = el(id);
+          if (!sel) return;
+          sel.innerHTML = "";
+          if (allowEmpty) {
+            const o = document.createElement("option");
+            o.value = "";
+            o.textContent = "(none)";
+            sel.appendChild(o);
+          }
+          keys.forEach((k) => {
+            const o = document.createElement("option");
+            o.value = k;
+            o.textContent = k;
+            sel.appendChild(o);
+          });
+          sel.value = current || (allowEmpty ? "" : keys[0] || "");
+        }
+        select("pagesKey", recKeys, state.mapping.pagesKey);
+        select("titleKey", pageKeys, state.mapping.titleKey, true);
+        select("urlKey", pageKeys, state.mapping.urlKey, true);
+        select("fitKey", pageKeys, state.mapping.fitKey, true);
+        select("scopedKey", pageKeys, state.mapping.scopedKey, true);
+        select("rawKey", pageKeys, state.mapping.rawKey, true);
+      }
+
+      function showError(err) {
+        document.body.innerHTML = `<pre style="padding:16px">${String(
+          err
+        )}</pre>`;
+        console.error(err);
+      }
+
+      (async function init() {
+        try {
+          wireGlobalDropZone((text, name) => {
+            try {
+              applyLoadedText(text, name);
+              populateSelect();
+              wireCopyButtons();
+              render(0);
+            } catch (e) {
+              showError(e);
+            }
+          });
+          el("openBtn").addEventListener("click", () =>
+            el("fileInput").click()
+          );
+          el("fileInput").addEventListener("change", async (e) => {
+            const f = e.target.files?.[0];
+            if (!f) return;
+            const text = await f.text();
+            applyLoadedText(text, f.name);
+            populateSelect();
+            wireCopyButtons();
+            render(0);
+          });
+          el("configBtn").addEventListener("click", () => {
+            const p = el("configPanel");
+            p.style.display = p.style.display === "none" ? "block" : "none";
+          });
+          el("applyConfig").addEventListener("click", () => {
+            const pagesKey = el("pagesKey").value || state.mapping.pagesKey;
+            const titleKey = el("titleKey").value || state.mapping.titleKey;
+            const urlKey = el("urlKey").value || state.mapping.urlKey;
+            const fitKey = el("fitKey").value || undefined;
+            const scopedKey = el("scopedKey").value || state.mapping.scopedKey;
+            const rawKey = el("rawKey").value || state.mapping.rawKey;
+            state.mapping = {
+              pagesKey,
+              titleKey,
+              urlKey,
+              fitKey,
+              scopedKey,
+              rawKey,
+            };
+            saveMapping("raw", state.sourceKey, state.mapping);
+            state.pageItemKeys = unionObjectKeys(
+              Array.isArray(recordsCache?.[0]?.[pagesKey])
+                ? recordsCache[0][pagesKey]
+                : []
+            );
+            state.data = buildCompaniesFromRecords(recordsCache);
+            populateSelect();
+            render(0);
+          });
+          // No default loading; rely on drop or file open
+        } catch (err) {
+          showError(err);
+        }
+      })();
+    </script>
+  </body>
+</html>
