@@ -19,15 +19,11 @@ COLUMNS: List[str] = [
     "rationale",
     "other_sublabel",
     "other_sublabel_definition",
-    "evidence_url_1",
-    "evidence_snippet_1",
-    "evidence_url_2",
-    "evidence_snippet_2",
-    "evidence_url_3",
-    "evidence_snippet_3",
     "model_name",
     "prompt_version",
     "run_id",
+    "status",
+    "error",
 ]
 
 

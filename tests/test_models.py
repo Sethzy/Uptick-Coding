@@ -32,7 +32,7 @@ async def test_valid_json_passes():
     cfg = ScoringConfig()
     json_text = (
         '{"classification_category":"Install Focus","confidence":80,'
-        '"rationale":"clear evidence","evidence":[{"url":"https://a.com","snippet":"x"}]}'
+        '"rationale":"clear rationale"}'
     )
     transport = _MockTransport([json_text])
     async with httpx.AsyncClient(transport=transport) as client:

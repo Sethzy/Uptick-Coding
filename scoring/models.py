@@ -23,27 +23,28 @@ from .schema import ModelClassification, get_model_classification_json_schema
 
 def _build_prompt(aggregated_context: str, prompt_version: str) -> str:
     schema_snippet = get_model_classification_json_schema()
-    # AIDEV-NOTE: Category definitions expanded (v2) for precision and disambiguation.
+    # AIDEV-NOTE: Evidence removed per PRD; instruct JSON-only with exact fields.
     user = (
-        "Goal: Classify the company’s business mix and provide citations (URL + snippet). Include a confidence value.\n"
-        "Definitions (be precise; base your decision on the ticket/project mix described in the context):\n"
-        "- Maintenance & Service Only: Companies focused exclusively on ongoing upkeep and repair of existing systems; recurring, mandated inspections; service calls, inspections, testing, preventative maintenance; small but frequent tickets; steady predictable revenue; do not typically handle new installs; indicators: high volume of recurring small-to-medium tickets and maintenance agreements.\n"
-        "- Install Focus: Primarily design and installation of new systems for new construction or major renovations; project-based; longer sales cycle; large, complex, multi-phase jobs with significant financial value; less frequent than service but much higher revenue per project; indicators: project-based work, blueprints/design focus, significant capex.\n"
-        "- 50/50 Split: Balanced mix of new installations and ongoing service/maintenance; can run large install projects while maintaining recurring service/inspection work; tickets show a mix of large multi-phase installs and smaller frequent service calls; indicators: roughly equal distribution of revenue or job count between installs and service.\n"
-        "- Other: Use only if evidence clearly does not support the three categories above. When selecting Other, also provide a concise sublabel (3-6 words, e.g., 'Security company') and a 2-3 sentence definition explaining it. Evidence must directly justify this sublabel.\n"
+        "Goal: Classify the company’s business mix and output ONLY JSON (json). Include a confidence value.\n"
+        "Definitions (base your decision on the ticket/project mix described in the context):\n"
+        "- Maintenance & Service Only: Companies focused exclusively on ongoing upkeep and repair of existing systems; recurring inspections; service calls, testing, preventative maintenance.\n"
+        "- Install Focus: Primarily design and installation of new systems for new construction or major renovations; project-based; higher revenue per project.\n"
+        "- 50/50 Split: Balanced mix of new installations and ongoing service/maintenance.\n"
+        "- Other: Use only if none of the above clearly applies. When selecting Other, also provide a concise sublabel (3-6 words, e.g., 'Security company') and a 2-3 sentence definition explaining it.\n"
         "- Confidence: integer 0–100 indicating how sure you are about the assigned category.\n\n"
-        "Schema:\n"
+        "Schema (required JSON fields):\n"
         f"{schema_snippet}\n\n"
         "Rules:\n"
-        "- Provide at least 1 evidence item; up to 3.\n"
-        "- Evidence snippets must be verbatim quotes from the provided text and include the source URL from headers.\n"
-        "- When category is 'Other', ensure the evidence specifically supports the sublabel you propose.\n"
-        "- Temperature: 0. Output JSON only.\n\n"
+        "- Output ONLY a single JSON object with EXACTLY these fields. No prose, no markdown, no extra keys.\n"
+        "- If classification_category is 'Other', include both 'other_sublabel' (3-6 words) and 'other_sublabel_definition' (2-3 sentences).\n"
+        "- Temperature: 0.\n\n"
+        "Minimal example JSON (not evidence-based):\n"
+        "{\n  \"classification_category\": \"Install Focus\",\n  \"confidence\": 80,\n  \"rationale\": \"Clear description of installation-focused services.\"\n}\n\n"
         "Context (Aggregated):\n"
         f"{aggregated_context}"
     )
     system = (
-        "You are a strict classifier. Read the aggregated website text. Output ONLY valid JSON per the schema."
+        "You are a strict classifier. Output ONLY valid JSON per the schema (json)."
     )
     # AIDEV-NOTE: prompt_version is currently unused in text; kept for future prompt routing.
     return json.dumps({"system": system, "user": user})
@@ -101,8 +102,8 @@ def _extract_content_text(raw_text: str) -> Tuple[str, Optional[Dict[str, Any]]]
     """
     try:
         data = json.loads(raw_text)
-        # If it's already the schema dict, return original text
-        if isinstance(data, dict) and {"classification_category", "confidence", "rationale", "evidence"}.issubset(data.keys()):
+        # If it's already the schema dict, return original text (no evidence expected)
+        if isinstance(data, dict) and {"classification_category", "confidence", "rationale"}.issubset(data.keys()):
             return raw_text, data.get("usage") if isinstance(data.get("usage"), dict) else None
         # OpenAI/OpenRouter envelope
         if isinstance(data, dict) and "choices" in data:
@@ -198,6 +199,7 @@ async def _post_openrouter(
             ],
             "temperature": 0,
             "response_format": {"type": "json_object"},
+            "max_tokens": payload.get("max_tokens"),
         },
         timeout=timeout_s,
     )
@@ -215,6 +217,8 @@ async def classify_domain_with_model(
     Returns a tuple of (parsed_model, metadata). On failure, parsed_model is None and metadata contains error info and raw text.
     """
     prompt_payload = json.loads(_build_prompt(aggregated_context, prompt_version))
+    # Inject max_tokens from config to reduce truncation risk
+    prompt_payload["max_tokens"] = cfg.max_tokens
 
     meta: Dict[str, Any] = {
         "model_name": cfg.model,
@@ -233,6 +237,16 @@ async def classify_domain_with_model(
         raw_text = resp.text
         meta["raw"] = raw_text
         parsed, err = _parse_model_json(raw_text)
+        # Handle empty content in JSON mode: quick retry
+        if parsed is None:
+            try:
+                content_text, _ = _extract_content_text(raw_text)
+                if not (content_text or "{}"):  # empty string -> retry path
+                    resp = await _request_with_retries(client, cfg, prompt_payload)
+                    meta["raw"] = resp.text
+                    parsed, err = _parse_model_json(resp.text)
+            except Exception:
+                pass
         if parsed is not None:
             return parsed, meta
         # Attempt single repair on parse/schema failure

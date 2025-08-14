@@ -1,0 +1,21 @@
+record_id,domain,classification_category,confidence,rationale,other_sublabel,other_sublabel_definition,model_name,prompt_version,run_id,status,error
+35494125844,usafireco.com,,,,,,deepseek/deepseek-chat-v3-0324:free,v1,7cd0ca4c-2cfc-4360-a171-1f6fafa5c3f3,invalid_json,"schema_validation_error: 3 validation errors for ModelClassification
+classification_category
+  Field required [type=missing, input_value={'id': 'gen-1755174841-98..._tokens_details': None}}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+confidence
+  Field required [type=missing, input_value={'id': 'gen-1755174841-98..._tokens_details': None}}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+rationale
+  Field required [type=missing, input_value={'id': 'gen-1755174841-98..._tokens_details': None}}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing"
+37315276942,djasafety.com,,,,,,deepseek/deepseek-chat-v3-0324:free,v1,7cd0ca4c-2cfc-4360-a171-1f6fafa5c3f3,invalid_json,"schema_validation_error: 3 validation errors for ModelClassification
+classification_category
+  Field required [type=missing, input_value={'error': {'message': 'Pr...EjPdYfqcSBS7lnHXcQBitX'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+confidence
+  Field required [type=missing, input_value={'error': {'message': 'Pr...EjPdYfqcSBS7lnHXcQBitX'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing
+rationale
+  Field required [type=missing, input_value={'error': {'message': 'Pr...EjPdYfqcSBS7lnHXcQBitX'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.11/v/missing"

@@ -16,7 +16,6 @@ import httpx
 
 from .config import ScoringConfig, load_config
 from .constants import DEFAULT_PROMPT_VERSION
-from .evidence import validate_and_normalize_evidence
 from .io_csv import append_row as append_csv_row
 from .io_jsonl import append_jsonl, append_raw_jsonl
 from .models import classify_domain_with_model
@@ -44,17 +43,10 @@ def _flatten_for_csv(domain: str, result: Dict[str, Any]) -> Dict[str, Any]:
         "model_name": result.get("model_name", ""),
         "prompt_version": result.get("prompt_version", ""),
         "run_id": result.get("run_id", ""),
-        "evidence_url_1": "",
-        "evidence_snippet_1": "",
-        "evidence_url_2": "",
-        "evidence_snippet_2": "",
-        "evidence_url_3": "",
-        "evidence_snippet_3": "",
+        "status": result.get("status", ""),
+        "error": result.get("error", ""),
+        # AIDEV-NOTE: Evidence columns removed per PRD fix-json-evidence.
     }
-    ev = result.get("evidence") or []
-    for idx in range(min(3, len(ev))):
-        row[f"evidence_url_{idx+1}"] = ev[idx].get("url", "")
-        row[f"evidence_snippet_{idx+1}"] = ev[idx].get("snippet", "")
     return row
 
 
@@ -83,33 +75,11 @@ async def _classify_one_async(
         base.update({"status": meta.get("status", "error"), "error": meta.get("error")})
         return base
 
-    # Evidence validation
-    valid_evidence, errors = validate_and_normalize_evidence(
-        aggregated_context, [e.model_dump() for e in parsed.evidence]  # type: ignore[arg-type]
-    )
-    if not valid_evidence:
-        base.update({
-            "status": "invalid_evidence",
-            "error": "; ".join(errors) if errors else "no_valid_evidence",
-            "classification_category": parsed.classification_category,
-            "confidence": parsed.confidence,
-            "rationale": parsed.rationale,
-            "evidence": [],
-        })
-        if parsed.classification_category == "Other":
-            # Include sublabel details for transparency even when evidence invalid
-            base.update({
-                "other_sublabel": getattr(parsed, "other_sublabel", None),
-                "other_sublabel_definition": getattr(parsed, "other_sublabel_definition", None),
-            })
-        return base
-
     base.update({
         "status": "ok",
         "classification_category": parsed.classification_category,
         "confidence": parsed.confidence,
         "rationale": parsed.rationale,
-        "evidence": valid_evidence,
     })
     if parsed.classification_category == "Other":
         base.update({

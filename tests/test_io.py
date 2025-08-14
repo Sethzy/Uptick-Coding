@@ -27,7 +27,7 @@ def test_csv_header_and_row():
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / "out.csv"
         ensure_csv_header(p)
-        append_row(p, {"domain": "acme.com", "classification_category": "Install Focus", "confidence": 80})
+        append_row(p, {"domain": "acme.com", "classification_category": "Install Focus", "confidence": 80, "status": "ok", "error": ""})
         lines = p.read_text(encoding="utf-8").splitlines()
         assert lines[0].split(",")[:4] == COLUMNS[:4]
         assert "acme.com" in lines[1]

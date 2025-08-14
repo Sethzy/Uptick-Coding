@@ -1,22 +1,18 @@
 """
 Purpose: Typed schemas for LLM scoring inputs/outputs.
 Description: Defines strict Pydantic models for model responses and helpers to access JSON schema text for prompts.
-Key Functions/Classes: EvidenceItem, ModelClassification, get_model_classification_json_schema.
+Key Functions/Classes: ModelClassification, get_model_classification_json_schema.
 """
 
 from __future__ import annotations
 
-from typing import List, Literal, Optional
-from pydantic import BaseModel, Field, HttpUrl, conint, field_validator, model_validator
+from typing import Literal, Optional
+from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic.config import ConfigDict
 import re
 
 
-# AIDEV-NOTE: Keep schema minimal and aligned with PRD; expand only with explicit scope changes.
-
-
-class EvidenceItem(BaseModel):
-    url: HttpUrl = Field(..., description="URL cited as evidence; must be present in aggregated headers")
-    snippet: str = Field(..., min_length=1, description="Verbatim quote from aggregated_context")
+# AIDEV-NOTE: Keep schema minimal and aligned with PRD; evidence removed per PRD fix-json-evidence.
 
 
 class ModelClassification(BaseModel):
@@ -26,9 +22,8 @@ class ModelClassification(BaseModel):
         "50/50 Split",
         "Other",
     ]
-    confidence: conint(ge=0, le=100)
+    confidence: int = Field(..., ge=0, le=100)
     rationale: str = Field(..., min_length=1)
-    evidence: List[EvidenceItem] = Field(..., min_items=1, max_items=3)
     # Only required when classification_category == "Other"
     other_sublabel: Optional[str] = Field(
         default=None,
@@ -75,6 +70,9 @@ class ModelClassification(BaseModel):
                 pass
         return self
 
+    # AIDEV-NOTE: Ignore unknown fields (e.g., legacy 'evidence') to avoid invalid_json on extra keys.
+    model_config = ConfigDict(extra="ignore")
+
 
 def get_model_classification_json_schema() -> str:
     """Return a compact JSON schema snippet for inclusion in the prompt text."""
@@ -84,11 +82,6 @@ def get_model_classification_json_schema() -> str:
         '  "classification_category": "Maintenance & Service Only|Install Focus|50/50 Split|Other",\n'
         '  "confidence": 0-100,\n'
         '  "rationale": "string",\n'
-        '  "evidence": [\n'
-        '    { "url": "string", "snippet": "string" },\n'
-        '    { "url": "string", "snippet": "string" },\n'
-        '    { "url": "string", "snippet": "string" }\n'
-        '  ],\n'
         '  "other_sublabel": "string (3-6 words, required when classification_category=\"Other\")",\n'
         '  "other_sublabel_definition": "string (2-3 sentences, required when classification_category=\"Other\")"\n'
         '}'
