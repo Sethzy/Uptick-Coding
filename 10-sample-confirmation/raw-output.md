@@ -15,13 +15,13 @@
 | usafireco.com | 1 | False | 493 | 123 |
 | djasafety.com | 0 | False | 0 | 0 |
 | thebluebook.com | 0 | False | 0 | 0 |
-| bighorn-fire.com | 6 | False | 13418 | 3354 |
+| bighorn-fire.com | 6 | False | 18739 | 4685 |
 | ctsfire.ca | 1 | False | 4402 | 1100 |
-| bluejackfire.com | 2 | False | 6160 | 1540 |
-| sfty.ca | 2 | False | 6852 | 1713 |
-| firesprinklersystemslongbeach.com | 4 | False | 13371 | 3343 |
-| lafiresprinklers.com | 4 | False | 12473 | 3118 |
-| fireprotectionwhittier.com | 4 | False | 23015 | 5754 |
+| bluejackfire.com | 0 | False | 0 | 0 |
+| firesprinklersystemslongbeach.com | 4 | False | 15618 | 3904 |
+| sfty.ca | 3 | False | 12171 | 3043 |
+| lafiresprinklers.com | 4 | False | 14731 | 3683 |
+| fireprotectionwhittier.com | 4 | False | 29954 | 7488 |
 
 
 ### usafireco.com
@@ -69,8 +69,8 @@ We use cookies to analyze website traffic…
 
 - **included_urls_count**: 6
 - **overflow**: False
-- **length.chars**: 13418
-- **length.approx_tokens**: 3354
+- **length.chars**: 18739
+- **length.approx_tokens**: 4685
   - included_urls:
     - https://www.bighorn-fire.com/
     - https://www.bighorn-fire.com/#page
@@ -99,61 +99,17 @@ CTS Fire and Security’s team of highly-trained technicians are experienced and
 
 ### bluejackfire.com
 
-- **included_urls_count**: 2
+- **included_urls_count**: 0
 - **overflow**: False
-- **length.chars**: 6160
-- **length.approx_tokens**: 1540
-  - included_urls:
-    - https://bluejackfire.com
-    - https://bluejackfire.com#about_us
-  - aggregated_context_sample:
-    ### [PAGE] https://bluejackfire.com
-Skip to content
-
-Our Brands
-About Us
-Our Mission
-Our Leadership
-CONTACT OUR TEAM
-
-Our Brands
-About Us
-Our Mission
-Our Leadership
-CONTACT OUR TEAM
-Bluejack Fire & Life Safety
-# Protecting What Matters
-##### We deliver code-compliant fire protection and life safety solutions with a commitment to excellence, innovation, and c…
-
-### sfty.ca
-
-- **included_urls_count**: 2
-- **overflow**: False
-- **length.chars**: 6852
-- **length.approx_tokens**: 1713
-  - included_urls:
-    - https://sfty.ca
-    - https://sfty.ca/services
-  - aggregated_context_sample:
-    ### [PAGE] https://sfty.ca
-MENU
-
-CLOSE
-
-# MAKE SFTY YOUR FIRST CHOICE
-## Your trusted health & safety partner
-CONTACT US
-OUR SERVICES
-
-## At SFTY Ltd., we design and manage the highest-standard health and safety programs customized to your business.
-SFTY Ltd. offers tailored health and safety programs focusing on workplace safety and operational excellence.…
+- **length.chars**: 0
+- **length.approx_tokens**: 0
 
 ### firesprinklersystemslongbeach.com
 
 - **included_urls_count**: 4
 - **overflow**: False
-- **length.chars**: 13371
-- **length.approx_tokens**: 3343
+- **length.chars**: 15618
+- **length.approx_tokens**: 3904
   - included_urls:
     - https://firesprinklersystemslongbeach.com
     - https://firesprinklersystemslongbeach.com/fire-protection-systems
@@ -177,12 +133,36 @@ Submit
 ## Our Services
 With fire accidents prominent in many areas in…
 
+### sfty.ca
+
+- **included_urls_count**: 3
+- **overflow**: False
+- **length.chars**: 12171
+- **length.approx_tokens**: 3043
+  - included_urls:
+    - https://sfty.ca
+    - https://sfty.ca/services
+    - https://sfty.ca/services/d-r-o-p-s-inspections/
+  - aggregated_context_sample:
+    ### [PAGE] https://sfty.ca
+MENU
+
+CLOSE
+
+# MAKE SFTY YOUR FIRST CHOICE
+## Your trusted health & safety partner
+CONTACT US
+OUR SERVICES
+
+## At SFTY Ltd., we design and manage the highest-standard health and safety programs customized to your business.
+SFTY Ltd. offers tailored health and safety programs focusing on workplace safety and operational excellence.…
+
 ### lafiresprinklers.com
 
 - **included_urls_count**: 4
 - **overflow**: False
-- **length.chars**: 12473
-- **length.approx_tokens**: 3118
+- **length.chars**: 14731
+- **length.approx_tokens**: 3683
   - included_urls:
     - https://lafiresprinklers.com
     - https://lafiresprinklers.com/fire-protection-systems
@@ -211,8 +191,8 @@ Fire Sprinkler Ins…
 
 - **included_urls_count**: 4
 - **overflow**: False
-- **length.chars**: 23015
-- **length.approx_tokens**: 5754
+- **length.chars**: 29954
+- **length.approx_tokens**: 7488
   - included_urls:
     - https://fireprotectionwhittier.com
     - https://fireprotectionwhittier.com/fire-protection-systems-in-artesia-get-a-free-quote-today

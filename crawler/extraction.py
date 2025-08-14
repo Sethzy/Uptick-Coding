@@ -285,6 +285,10 @@ def make_page_record(
     md_obj = _get(result, "markdown") or {}
     md_raw = _get(md_obj, "raw_markdown", "") if md_obj else ""
     md_fit = _get(md_obj, "fit_markdown", "") if md_obj else ""
+    # AIDEV-NOTE: When no content filter is used, fit_markdown is absent.
+    # In that case, align fit to the default generator output (raw_markdown).
+    if not md_fit:
+        md_fit = md_raw
     if md_fit:
         # AIDEV-NOTE: Remove links from fit markdown only (keep raw for provenance)
         md_fit = strip_links_from_markdown(md_fit)

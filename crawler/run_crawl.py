@@ -52,7 +52,6 @@ except Exception:  # pragma: no cover
     except Exception:  # pragma: no cover
         LinkPreviewConfig = None  # type: ignore
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
-from crawl4ai.content_filter_strategy import PruningContentFilter
 import argparse
 
 
@@ -110,29 +109,9 @@ def main() -> int:
         # Note: headers are handled internally by Crawl4AI/Playwright. Keep BrowserConfig minimal.
         browser = BrowserConfig(headless=True, verbose=False)
 
-        # AIDEV-NOTE: Enable pruning to populate `fit_markdown`. Threshold is env-tunable via CRAWL4AI_FILTER_THRESHOLD.
-        try:
-            cf_threshold = float(os.getenv("CRAWL4AI_FILTER_THRESHOLD", "0.25"))
-        except Exception:
-            cf_threshold = 0.25
-        content_filter = PruningContentFilter(
-            threshold=cf_threshold,
-            threshold_type="dynamic",
-            min_word_threshold=10,
-        )
-        md = DefaultMarkdownGenerator(
-            content_filter=content_filter,
-            options={
-                "body_width": 0,
-                "ignore_emphasis": False,
-                "ignore_links": False,
-                "ignore_images": False,
-                "protect_links": True,
-                "single_line_break": True,
-                "mark_code": True,
-                "escape_snob": False,
-            },
-        )
+        # AIDEV-NOTE: Use the default Markdown generator with no additional filtering.
+        # This aligns "fit" output with Crawl4AI's standard HTML→Markdown conversion.
+        md = DefaultMarkdownGenerator()
 
         cp = load_checkpoint(args.checkpoint) if args.resume else {}
 
