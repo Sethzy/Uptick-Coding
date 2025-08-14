@@ -74,52 +74,26 @@ The classifier must provide evidence URLs/snippets supporting the assigned categ
 2. LLM Classification
 
    - For each domain, send the aggregated context to the LLM with a strict JSON schema.
-   - Require: `classification_category` (see taxonomy), `confidence` (0–100), `rationale` (short), and up to 3 `evidence` items `{url, snippet}`.
-   - Force citation discipline: responses without at least 1 evidence item are invalid and must be retried.
-   - Temperature set to 0 (or the model’s equivalent) for stability.
+   - Require: `classification_category` (see taxonomy), `rationale` (short)
 
 3. Model Support
 
    - Default model: Qwen3 30B A3B via OpenRouter (low/no cost path for Phase 1).
-   - Record `model_name`, `model_version`, and `prompt_version` with each output.
 
-4. Confidence Reporting
-
-   - Require a numeric `confidence` in the classification on a 0–100 scale.
-   - Confidence should reflect strength and clarity of evidence and internal agreement across pages.
-
-5. Evidence Extraction & Retention
-
-   - Return up to 3 strongest evidence items per domain by default.
-   - Evidence items include full `snippet` text and `url` (no truncation beyond max snippet length config).
-
-6. Output Schemas
+4. Output Schemas
 
    - JSONL: one object per domain with fields listed in Section 6 (Design Considerations).
    - CSV: flat columns including tier, score, top evidence URLs/snippets (up to 3), model/prompt metadata, and run IDs.
 
-7. CLI Interface
+5. CLI Interface
 
    - Provide a CLI command to score a file of domains and produce CSV and/or JSONL.
    - Flags for model selection(s), output formats, thresholds, and max-evidence count.
 
-8. Python API
-
-   - Provide a simple `score_domain()` and `score_file()` API returning structured objects and writing outputs.
-
-9. Configurability
-
-- YAML/JSON config for thresholds, evidence count, token budget, model, and temperature.
-
-10. Logging & Audit
+6. Logging & Audit
 
 - Log per-domain run metadata: `domain`, `run_id`, `timestamp`, `model`, `prompt_version`, token counts.
 - Save the raw LLM response payload alongside parsed outputs for debugging.
-
-11. Error Handling & Retries
-
-- Retry transient LLM/API failures with exponential backoff.
-- Validate JSON strictly; re-prompt once with a repair instruction if parsing fails.
 
 ## 5) Non-Goals (Out of Scope)
 
@@ -216,19 +190,6 @@ Context (Aggregated):
   - Page sections must follow the Aggregated Context Builder PRD (ordering, headers, separation, content selection, normalization, deduplication, determinism).
   - The `aggregated_context` is the only content field consumed by the classifier.
   - Crawler/scorer must log the ordered list of included page URLs for audit.
-
-### 6.5 Evidence Discipline
-
-- Require 1–3 evidence items in every model response.
-- Each item must include:
-  - `url`: must be present in the aggregated page set (i.e., exactly matches a `### [PAGE] <url>` header)
-  - `snippet`: verbatim quote from `aggregated_context`
-- Snippet handling:
-  - Trim to sentence boundaries when possible; cap length to ~320 characters (configurable).
-  - Deduplicate across items; prefer diverse URLs/pages where available.
-- Validation:
-  - Reject responses with no valid evidence or with URLs not present in the aggregated set.
-  - Perform a single “repair” re‑prompt on validation failure; if still invalid, record an explicit error and continue.
 
 ## 7) Technical Considerations
 

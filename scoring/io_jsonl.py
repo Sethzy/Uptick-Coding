@@ -1,42 +1,31 @@
 """
-Purpose: JSONL writers for scorer outputs and raw model payloads.
-Description: Provides simple append helpers that produce deterministic JSON lines with sorted keys and compact separators.
-Key Functions/Classes: append_jsonl, append_raw_jsonl.
+Purpose: JSONL read/write helpers for the scoring pipeline.
+Description: Small utilities to load LLM inputs and persist results.
+Key Functions/Classes: `iter_llm_inputs_from_jsonl`, `write_results_jsonl`.
 """
 
 from __future__ import annotations
 
-import io
 import json
-from pathlib import Path
-from typing import Any, Dict
+from typing import Iterable
+
+from .models import ClassificationResult, LlmInput
 
 
-# AIDEV-NOTE: Deterministic formatting eases diffs and audits across runs.
+def iter_llm_inputs_from_jsonl(path: str) -> Iterable[LlmInput]:
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            yield LlmInput.model_validate(obj)
 
 
-def _dumps_sorted(obj: Dict[str, Any]) -> str:
-    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-
-
-def append_jsonl(path: str | Path, obj: Dict[str, Any]) -> None:
-    """Append a single JSON object as one line to a file (creating parent dirs if needed)."""
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as f:
-        f.write(_dumps_sorted(obj))
-        f.write("\n")
-
-
-def append_raw_jsonl(path: str | Path, text: str) -> None:
-    """Append a raw text line to a JSONL file. Caller guarantees `text` is JSON string.
-
-    Useful for persisting model raw responses for audit/debug.
-    """
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as f:
-        f.write(text.strip())
-        f.write("\n")
+def write_results_jsonl(path: str, results: Iterable[ClassificationResult]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        for r in results:
+            f.write(r.model_dump_json())
+            f.write("\n")
 
 

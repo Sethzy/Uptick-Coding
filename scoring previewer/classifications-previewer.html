@@ -62,8 +62,8 @@
       }
       .grid {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
+        grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+        gap: 16px;
       }
       @media (max-width: 900px) {
         .grid {
@@ -75,53 +75,109 @@
         border-radius: 12px;
         background: Canvas;
         overflow: hidden;
+        transition: box-shadow 0.2s ease;
+      }
+      .card:hover {
+        box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
       }
       .card header {
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        padding: 10px 12px;
+        align-items: flex-start;
+        padding: 16px;
         border-bottom: 1px solid rgb(0 0 0 / 10%);
+        background: color-mix(in oklab, Canvas 95%, CanvasText 5%);
       }
       .card .content {
-        padding: 10px 12px;
+        padding: 16px;
       }
       .title {
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 4px;
         min-width: 0;
+        flex: 1;
       }
       .domain {
         font-weight: 600;
+        font-size: 16px;
         overflow: hidden;
         text-overflow: ellipsis;
+        color: color-mix(in oklab, CanvasText 90%, Canvas 10%);
+      }
+      .category {
+        font-size: 14px;
+        font-weight: 500;
+        color: color-mix(in oklab, CanvasText 70%, Canvas 30%);
       }
       .pill {
         display: inline-block;
-        padding: 2px 8px;
+        padding: 4px 12px;
         border-radius: 999px;
         background: color-mix(in oklab, CanvasText 10%, Canvas 90%);
         font-size: 12px;
+        font-weight: 500;
         opacity: 0.9;
+        white-space: nowrap;
       }
       .details {
-        margin-top: 8px;
+        margin-top: 12px;
         display: none;
       }
+      .rationale {
+        background: color-mix(in oklab, Canvas 98%, CanvasText 2%);
+        border: 1px solid rgb(0 0 0 / 8%);
+        border-radius: 8px;
+        padding: 12px;
+        margin-top: 8px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
       .evidence {
-        margin-top: 6px;
+        margin-top: 12px;
         font-size: 13px;
       }
       .evidence-item {
         border-left: 3px solid rgb(0 0 0 / 12%);
-        padding: 6px 10px;
-        margin: 6px 0;
+        padding: 8px 12px;
+        margin: 8px 0;
+        background: color-mix(in oklab, Canvas 98%, CanvasText 2%);
+        border-radius: 0 6px 6px 0;
       }
       .controls {
         display: flex;
         gap: 8px;
         align-items: center;
+        flex-shrink: 0;
+      }
+      .toggle {
+        background: color-mix(in oklab, CanvasText 10%, Canvas 90%);
+        border: 1px solid rgb(0 0 0 / 15%);
+        color: CanvasText;
+        font-size: 12px;
+        padding: 6px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      .toggle:hover {
+        background: color-mix(in oklab, CanvasText 15%, Canvas 85%);
+      }
+      .confidence-high {
+        background: #dcfce7;
+        color: #166534;
+      }
+      .confidence-medium {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .confidence-low {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .confidence-unknown {
+        background: #f3f4f6;
+        color: #374151;
       }
     </style>
   </head>
@@ -143,18 +199,19 @@
       </div>
     </header>
     <main>
-      <div class="row" style="margin-bottom: 12px">
+      <div class="row" style="margin-bottom: 16px">
         <input
           id="search"
-          placeholder="Filter by domain/category..."
+          placeholder="Filter by domain or category..."
           style="
             flex: 1;
-            min-width: 220px;
-            padding: 8px 10px;
+            min-width: 300px;
+            padding: 10px 12px;
             border: 1px solid rgb(0 0 0 / 20%);
             border-radius: 8px;
             background: Field;
             color: FieldText;
+            font-size: 14px;
           "
         />
         <span class="muted" id="stats">0 results</span>
@@ -165,7 +222,7 @@
       <section
         id="configPanel"
         class="card"
-        style="margin-top: 12px; display: none"
+        style="margin-top: 16px; display: none"
       >
         <header>
           <div class="title">
@@ -176,7 +233,7 @@
             <button id="applyConfig">Apply</button>
           </div>
         </header>
-        <div class="content" style="display: flex; gap: 12px; flex-wrap: wrap">
+        <div class="content" style="display: flex; gap: 16px; flex-wrap: wrap">
           <label
             >Domain key
             <select id="domainKey"></select
@@ -289,6 +346,15 @@
           evidenceUrlKey,
         };
       }
+      function getConfidenceClass(confidence) {
+        if (confidence === undefined || confidence === null)
+          return "confidence-unknown";
+        const num = parseFloat(confidence);
+        if (isNaN(num)) return "confidence-unknown";
+        if (num >= 0.8) return "confidence-high";
+        if (num >= 0.6) return "confidence-medium";
+        return "confidence-low";
+      }
       function saveMapping(kind, sourceKey, mapping) {
         try {
           localStorage.setItem(
@@ -387,16 +453,18 @@
             <header>
               <div class="title">
                 <div class="domain">${escapeHtml(domain)}</div>
-                <div class="muted">Category: <strong>${escapeHtml(
-                  category
-                )}</strong></div>
+                <div class="category">${escapeHtml(category)}</div>
               </div>
               <div class="controls">
-                <span class="pill" title="Confidence">${
+                ${
                   confidence !== undefined && confidence !== null
-                    ? escapeHtml(String(confidence))
-                    : "—"
-                }</span>
+                    ? `<span class="pill ${getConfidenceClass(
+                        confidence
+                      )}" title="Confidence">${escapeHtml(
+                        String(confidence)
+                      )}</span>`
+                    : ""
+                }
                 <button class="toggle">Details</button>
               </div>
             </header>
@@ -404,9 +472,9 @@
               <div class="details" hidden>
                 ${
                   rationale
-                    ? `<div class="muted">Rationale</div><pre style="white-space:pre-wrap; margin:4px 0 8px 0">${escapeHtml(
+                    ? `<div class="rationale">${escapeHtml(
                         String(rationale)
-                      )}</pre>`
+                      )}</div>`
                     : ""
                 }
                 ${
@@ -422,9 +490,11 @@
             if (isHidden) {
               details.removeAttribute("hidden");
               details.style.display = "block";
+              toggle.textContent = "Hide";
             } else {
               details.setAttribute("hidden", "");
               details.style.display = "none";
+              toggle.textContent = "Details";
             }
           });
           list.appendChild(card);

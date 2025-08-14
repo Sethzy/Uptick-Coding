@@ -1,46 +1,55 @@
 """
-Purpose: CSV writer for scorer outputs.
-Description: Flattens model outputs and metadata into a stable set of columns.
-Key Functions/Classes: ensure_csv_header, append_row.
+Purpose: CSV writer for the scoring pipeline.
+Description: Writes flattened classification results to CSV with evidence columns.
+Key Functions/Classes: `write_results_csv`.
 """
 
 from __future__ import annotations
 
 import csv
-from pathlib import Path
-from typing import Dict, List, Any
+from typing import Iterable
+
+from .models import ClassificationResult
 
 
-COLUMNS: List[str] = [
-    "record_id",
-    "domain",
-    "classification_category",
-    "confidence",
-    "rationale",
-    "other_sublabel",
-    "other_sublabel_definition",
-    "model_name",
-    "prompt_version",
-    "run_id",
-    "status",
-    "error",
-]
-
-
-def ensure_csv_header(path: str | Path) -> None:
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    if not p.exists() or p.stat().st_size == 0:
-        with p.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(COLUMNS)
-
-
-def append_row(path: str | Path, row: Dict[str, Any]) -> None:
-    ensure_csv_header(path)
-    values = [row.get(col, "") for col in COLUMNS]
-    with Path(path).open("a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(values)
+def write_results_csv(path: str, results: Iterable[ClassificationResult]) -> None:
+    fieldnames = [
+        "domain",
+        "classification_category",
+        "rationale",
+        "evidence_url_1",
+        "evidence_snippet_1",
+        "evidence_url_2",
+        "evidence_snippet_2",
+        "evidence_url_3",
+        "evidence_snippet_3",
+        "model_name",
+        "model_version",
+        "prompt_version",
+        "classifier_mode",
+        "run_id",
+    ]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for r in results:
+            writer.writerow(
+                {
+                    "domain": r.domain,
+                    "classification_category": r.classification_category,
+                    "rationale": r.rationale,
+                    "evidence_url_1": "",
+                    "evidence_snippet_1": "",
+                    "evidence_url_2": "",
+                    "evidence_snippet_2": "",
+                    "evidence_url_3": "",
+                    "evidence_snippet_3": "",
+                    "model_name": "",
+                    "model_version": "",
+                    "prompt_version": "",
+                    "classifier_mode": "LLM",
+                    "run_id": "",
+                }
+            )
 
 

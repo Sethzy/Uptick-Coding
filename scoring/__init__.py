@@ -1,18 +1,17 @@
 """
-Purpose: Package initializer for the scoring module.
-Description: Exposes configuration helpers and constants for external consumers.
-Key Functions/Classes: ScoringConfig dataclass, load_config; DEFAULT_PROMPT_VERSION.
+Purpose: Public API surface for the lightweight LLM scoring pipeline.
+Description: Exposes Python-callable helpers to score a single domain or a file
+of aggregated contexts. Thin wrapper that delegates to `api` module.
+Key Functions/Classes: `score_domain`, `score_file`.
 """
 
-# AIDEV-NOTE: Keep exports minimal; expand as submodules are implemented.
+# AIDEV-NOTE: Keep __all__ minimal and stable for import ergonomics.
 
-from .config import ScoringConfig, load_config
-from .constants import DEFAULT_PROMPT_VERSION
+from .api import score_domain, score_file
 
 __all__ = [
-    "ScoringConfig",
-    "load_config",
-    "DEFAULT_PROMPT_VERSION",
+    "score_domain",
+    "score_file",
 ]
 
 

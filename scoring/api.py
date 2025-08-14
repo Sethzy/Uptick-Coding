@@ -1,190 +1,202 @@
 """
-Purpose: Public Python API for scoring.
-Description: Synchronous wrappers for classifying a single domain or a JSONL file of inputs.
-Key Functions/Classes: score_domain, score_file.
+Purpose: Python API for the lightweight LLM scoring pipeline.
+Description: Implements `score_domain` and `score_file` to call an LLM on a
+pre-built aggregated context per domain and emit JSONL/CSV outputs.
+Key Functions/Classes: `score_domain`, `score_file`.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Set
-from uuid import uuid4
+import os
+import time
+from dataclasses import dataclass
+from typing import Iterable, List, Optional
 
 import httpx
 
-from .config import ScoringConfig, load_config
-from .constants import DEFAULT_PROMPT_VERSION
-from .io_csv import append_row as append_csv_row
-from .io_jsonl import append_jsonl, append_raw_jsonl
-from .models import classify_domain_with_model
-from .logging import get_logger
-from .run import build_http_client
+from .models import ClassificationResult, LlmInput
+from .config import get_openrouter_api_key, get_openrouter_endpoint
+from .io_jsonl import iter_llm_inputs_from_jsonl, write_results_jsonl
+from .io_csv import write_results_csv
+from .logging import log_info, log_error
 
 
-def _iter_jsonl(path: str | Path) -> Iterable[Dict[str, Any]]:
-    with Path(path).open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            yield json.loads(line)
+# AIDEV-NOTE: Minimal schema to satisfy simplified PRD v1.
 
 
-def _flatten_for_csv(domain: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    row: Dict[str, Any] = {
-        "domain": domain,
-        "classification_category": result.get("classification_category", ""),
-        "confidence": result.get("confidence", ""),
-        "rationale": result.get("rationale", ""),
-        "other_sublabel": result.get("other_sublabel", ""),
-        "other_sublabel_definition": result.get("other_sublabel_definition", ""),
-        "model_name": result.get("model_name", ""),
-        "prompt_version": result.get("prompt_version", ""),
-        "run_id": result.get("run_id", ""),
-        "status": result.get("status", ""),
-        "error": result.get("error", ""),
-        # AIDEV-NOTE: Evidence columns removed per PRD fix-json-evidence.
-    }
-    return row
+@dataclass
+class LlmConfig:
+    model: str = "qwen/qwen3-30b-a3b"
+    temperature: float = 0.0
+    top_p: float = 1.0
+    max_tokens: int = 512
+    timeout_seconds: int = 90
+    # AIDEV-NOTE: Keep config minimal; prompt is fixed.
 
 
-async def _classify_one_async(
-    client: httpx.AsyncClient,
-    cfg: ScoringConfig,
-    domain: str,
-    aggregated_context: str,
-    prompt_version: str,
-    run_id: str,
-    raw_jsonl_path: Optional[str | Path] = None,
-) -> Dict[str, Any]:
-    parsed, meta = await classify_domain_with_model(client, cfg, aggregated_context, prompt_version)
-    if meta.get("raw") and raw_jsonl_path:
-        append_raw_jsonl(raw_jsonl_path, meta["raw"])  # persist raw model text
+OPENROUTER_API_BASE = get_openrouter_endpoint()
 
-    base: Dict[str, Any] = {
-        "domain": domain,
-        "model_name": meta.get("model_name"),
-        "prompt_version": meta.get("prompt_version"),
-        "run_id": run_id,
-        "token_counts": meta.get("token_counts"),
+
+def _build_prompt(aggregated_context: str) -> dict:
+    system = (
+        "You are a strict classifier. Read the aggregated website text. "
+        "Output ONLY valid JSON per the schema."
+    )
+    user = (
+        "Goal: Classify the company’s business mix.\n"
+        "Definitions:\n"
+        "- Classification categories:\n"
+        "  - \"Maintenance & Service Only\"\n"
+        "  - \"Install Focus\"\n"
+        "  - \"50/50 Split\"\n"
+        "  - \"Other\"\n"
+        "Schema:\n"
+        "{\n"
+        "  \"classification_category\": \"Maintenance & Service Only|Install Focus|50/50 Split|Other\",\n"
+        "  \"rationale\": \"Brief explanation of why this classification was chosen based on the website content\"\n"
+        "}\n"
+        "Rules:\n"
+        "- Temperature: 0. Output JSON only.\n"
+        "- Provide a clear, concise rationale (2-3 sentences max).\n\n"
+        f"Context (Aggregated):\n{aggregated_context}"
+    )
+    return {
+        "role": "user",
+        "content": f"System: {system}\n\nUser:\n{user}",
     }
 
-    if parsed is None:
-        base.update({"status": meta.get("status", "error"), "error": meta.get("error")})
-        return base
 
-    base.update({
-        "status": "ok",
-        "classification_category": parsed.classification_category,
-        "confidence": parsed.confidence,
-        "rationale": parsed.rationale,
-    })
-    if parsed.classification_category == "Other":
-        base.update({
-            "other_sublabel": getattr(parsed, "other_sublabel", None),
-            "other_sublabel_definition": getattr(parsed, "other_sublabel_definition", None),
-        })
-    return base
+def _parse_llm_json(raw_text: str) -> dict:
+    # AIDEV-NOTE: Strict JSON parse; one simple repair attempt if wrapped in code fences.
+    text = raw_text.strip()
+    if text.startswith("```") and text.endswith("```"):
+        text = text.strip("`")
+        # Remove optional language tag lines
+        if "\n" in text:
+            parts = text.split("\n", 1)
+            text = parts[1] if len(parts) > 1 else parts[0]
+    return json.loads(text)
+
+
+def _call_openrouter_sync(client: httpx.Client, cfg: LlmConfig, prompt: dict) -> tuple[dict, dict]:
+    api_key = get_openrouter_api_key() or ""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": cfg.model,
+        "messages": [
+            {"role": "system", "content": "You are a strict JSON-only classifier."},
+            prompt,
+        ],
+        "temperature": cfg.temperature,
+        "top_p": cfg.top_p,
+        "max_tokens": cfg.max_tokens,
+        "response_format": {"type": "json_object"},
+    }
+    started = time.monotonic()
+    resp = client.post(
+        f"{OPENROUTER_API_BASE}/chat/completions",
+        json=payload,
+        headers=headers,
+        timeout=cfg.timeout_seconds,
+    )
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    resp.raise_for_status()
+    data = resp.json()
+    content = data["choices"][0]["message"]["content"]
+    obj = _parse_llm_json(content)
+    usage = data.get("usage", {})
+    return obj, {"request_ms": elapsed_ms, "token_counts": usage}
 
 
 def score_domain(
     *,
     domain: str,
     aggregated_context: str,
-    cfg: Optional[ScoringConfig] = None,
-    prompt_version: str = DEFAULT_PROMPT_VERSION,
-) -> Dict[str, Any]:
-    cfg = cfg or load_config()
-    run_id = str(uuid4())
-    async def _inner() -> Dict[str, Any]:
-        async with build_http_client(cfg) as client:
-            return await _classify_one_async(client, cfg, domain, aggregated_context, prompt_version, run_id)
-    return asyncio.run(_inner())
+    model: str = "qwen/qwen3-30b-a3b",
+    timeout_seconds: int = 90,
+) -> ClassificationResult:
+    cfg = LlmConfig(model=model, timeout_seconds=timeout_seconds)
+    prompt = _build_prompt(aggregated_context)
+
+    log_info(f"Processing domain: {domain}")
+    
+    # Simple sync retries on transient errors.
+    with httpx.Client() as client:
+        attempts = 0
+        last_exc: Optional[Exception] = None
+        while attempts < 3:
+            attempts += 1
+            try:
+                log_info(f"  Calling LLM (attempt {attempts}/3)...")
+                obj, _meta = _call_openrouter_sync(client, cfg, prompt)
+                log_info(f"  ✅ Classified as: {obj.get('classification_category', 'Other')}")
+                return ClassificationResult(
+                    domain=domain,
+                    classification_category=obj.get("classification_category", "Other"),
+                    rationale=obj.get("rationale", "No rationale provided"),
+                )
+            except httpx.HTTPStatusError as e:
+                if 400 <= e.response.status_code < 500 and e.response.status_code not in (429,):
+                    log_error(f"  ❌ HTTP error: {e.response.status_code}")
+                    raise
+                last_exc = e
+                log_error(f"  ⚠️  Retryable error: {e.response.status_code}")
+            except Exception as e:
+                last_exc = e
+                log_error(f"  ⚠️  Network error: {type(e).__name__}")
+            time.sleep(0.8 * attempts)
+        assert last_exc is not None
+        log_error(f"  ❌ Failed after {attempts} attempts")
+        raise last_exc
+
+
+def _iter_llm_inputs_from_jsonl(path: str) -> Iterable[LlmInput]:
+    # Backward shim to keep api small; delegate to io_jsonl
+    return iter_llm_inputs_from_jsonl(path)
 
 
 def score_file(
     *,
-    input_jsonl: str | Path,
-    output_jsonl: Optional[str | Path] = None,
-    output_csv: Optional[str | Path] = None,
-    cfg: Optional[ScoringConfig] = None,
-    prompt_version: str = DEFAULT_PROMPT_VERSION,
-    raw_jsonl: Optional[str | Path] = None,
-    checkpoint: Optional[str | Path] = None,
-    workers: Optional[int] = None,
-) -> None:
-    cfg = cfg or load_config()
-    run_id = str(uuid4())
-    logger = get_logger()
-    worker_count = workers or cfg.worker_count
+    input_jsonl: str,
+    output_jsonl: Optional[str] = None,
+    output_csv: Optional[str] = None,
+    model: str = "qwen/qwen3-30b-a3b",
+    timeout_seconds: int = 90,
+) -> List[ClassificationResult]:
+    inputs = list(_iter_llm_inputs_from_jsonl(input_jsonl))
+    
+    log_info(f"Starting classification of {len(inputs)} domains using model: {model}")
+    log_info(f"Outputs: JSONL={output_jsonl or 'none'}, CSV={output_csv or 'none'}")
 
-    # Derive default output paths (more descriptive) if not supplied
-    input_path = Path(input_jsonl)
-    out_dir = input_path.parent
-    if output_jsonl is None:
-        output_jsonl = str(out_dir / "classifications.jsonl")
-    if output_csv is None:
-        output_csv = str(out_dir / "classifications-review.csv")
-    if raw_jsonl is None:
-        raw_jsonl = str(out_dir / "raw-model-responses.jsonl")
+    results: List[ClassificationResult] = []
+    for i, item in enumerate(inputs, 1):
+        log_info(f"\n[{i}/{len(inputs)}] Processing domain: {item.domain}")
+        try:
+            result = score_domain(
+                domain=item.domain,
+                aggregated_context=item.aggregated_context,
+                model=model,
+                timeout_seconds=timeout_seconds,
+            )
+            results.append(result)
+        except Exception as e:
+            log_error(f"Failed to process {item.domain}: {e}")
+            # Continue with next domain instead of failing completely
+            continue
 
-    def _load_checkpoint(path: Path) -> Set[str]:
-        if not path.exists():
-            return set()
-        return set([line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()])
+    log_info(f"\n✅ Completed {len(results)}/{len(inputs)} domains successfully")
+    
+    if output_jsonl:
+        log_info(f"Writing JSONL to: {output_jsonl}")
+        write_results_jsonl(output_jsonl, results)
+    if output_csv:
+        log_info(f"Writing CSV to: {output_csv}")
+        write_results_csv(output_csv, results)
 
-    def _append_checkpoint(path: Path, domain: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as f:
-            f.write(domain + "\n")
-
-    async def _inner() -> None:
-        async with build_http_client(cfg) as client:
-            # Prepare tasks and checkpoint
-            ckpt_path: Optional[Path]
-            if checkpoint:
-                ckpt_path = Path(checkpoint)
-            else:
-                # Default checkpoint alongside outputs with a descriptive name
-                ckpt_path = Path(output_jsonl).with_name("processed-domains.ckpt") if output_jsonl else None
-            processed: Set[str] = _load_checkpoint(ckpt_path) if ckpt_path else set()
-            items: List[Tuple[str, str, str]] = []
-            for obj in _iter_jsonl(input_jsonl):
-                d = obj.get("domain", "")
-                if ckpt_path and d in processed:
-                    continue
-                rid = str(obj.get("record_id", "")) if obj.get("record_id") is not None else ""
-                items.append((d, obj.get("aggregated_context", ""), rid))
-
-            sem = asyncio.Semaphore(max(1, int(worker_count)))
-            write_lock = asyncio.Lock()
-
-            async def _run_one(d: str, ctx: str, rid: str) -> None:
-                async with sem:
-                    logger.log("classify.start", domain=d, run_id=run_id, model=cfg.model, prompt_version=prompt_version)
-                    result = await _classify_one_async(
-                        client, cfg, domain=d, aggregated_context=ctx, prompt_version=prompt_version, run_id=run_id, raw_jsonl_path=raw_jsonl
-                    )
-                    logger.log("classify.end", domain=d, run_id=run_id, status=result.get("status"), error=result.get("error"))
-                    async with write_lock:
-                        if output_jsonl:
-                            # Carry through record_id if present on input aggregated JSONL
-                            result_with_id = dict(result)
-                            if rid:
-                                result_with_id["record_id"] = rid
-                            append_jsonl(output_jsonl, result_with_id)
-                        if output_csv:
-                            row = _flatten_for_csv(d, result)
-                            if rid:
-                                row["record_id"] = rid
-                            append_csv_row(output_csv, row)
-                        if ckpt_path:
-                            _append_checkpoint(ckpt_path, d)
-
-            await asyncio.gather(*[ _run_one(d, c, r) for d, c, r in items ])
-
-    asyncio.run(_inner())
+    return results
 
 

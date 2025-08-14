@@ -1,51 +1,66 @@
 """
-Purpose: CLI entrypoint for scorer.
-Description: Provides `scorer classify` command to process an input JSONL and emit JSONL/CSV outputs.
-Key Functions/Classes: main.
+Purpose: CLI for the lightweight LLM scoring pipeline.
+Description: Provides a `scorer classify` command to read aggregated-context
+JSONL, call the LLM, and write JSONL/CSV outputs.
+Key Functions/Classes: Click entrypoints `scorer` and `classify`.
 """
 
 from __future__ import annotations
 
-import sys
+import os
+from typing import Optional
+
 import click
 
 from .api import score_file
+from .config import get_openrouter_api_key
+from .logging import log_info
+
+
+# AIDEV-NOTE: We use env var OPENROUTER_API_KEY for authentication.
 
 
 @click.group()
-def cli() -> None:
-    pass
+def scorer() -> None:
+    """Lead scoring utilities."""
 
 
-@cli.command("classify")
-@click.option("--input", "input_jsonl", required=True, type=click.Path(exists=True, dir_okay=False), help="Aggregated input JSONL (one domain per line)")
-@click.option("--output-jsonl", "output_jsonl", required=False, type=click.Path(dir_okay=False), help="Defaults to classifications.jsonl next to input")
-@click.option("--output-csv", "output_csv", required=False, type=click.Path(dir_okay=False), help="Defaults to classifications-review.csv next to input")
-@click.option("--prompt-version", "prompt_version", required=False, default="v1")
-@click.option("--raw-jsonl", "raw_jsonl", required=False, type=click.Path(dir_okay=False), help="Defaults to raw-model-responses.jsonl next to input")
-@click.option("--checkpoint", "checkpoint", required=False, type=click.Path(dir_okay=False), help="Path to checkpoint file; defaults to output_jsonl.ckpt")
-@click.option("--workers", "workers", required=False, type=int, help="Worker count; defaults to config.worker_count")
-def classify_cmd(input_jsonl: str, output_jsonl: str | None, output_csv: str | None, prompt_version: str, raw_jsonl: str | None, checkpoint: str | None, workers: int | None) -> None:
-    try:
-        score_file(
-            input_jsonl=input_jsonl,
-            output_jsonl=output_jsonl,
-            output_csv=output_csv,
-            prompt_version=prompt_version,
-            raw_jsonl=raw_jsonl,
-            checkpoint=checkpoint,
-            workers=workers,
-        )
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+@scorer.command()
+@click.option("--input-jsonl", required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--output-jsonl", required=False, type=click.Path(dir_okay=False))
+@click.option("--output-csv", required=False, type=click.Path(dir_okay=False))
+@click.option("--model", default="qwen/qwen3-30b-a3b", show_default=True)
+@click.option("--timeout-seconds", default=90, type=int, show_default=True)
+def classify(
+    input_jsonl: str,
+    output_jsonl: Optional[str],
+    output_csv: Optional[str],
+    model: str,
+    timeout_seconds: int,
+) -> None:
+    """Classify domains using aggregated context JSONL input and write outputs."""
+    if not get_openrouter_api_key():
+        raise click.ClickException("OpenRouter key not found (set OPENROUTER_API_KEY or OPENROUTER_KEY, or .env)")
+
+    log_info("🚀 Starting domain classification pipeline")
+    log_info(f"📁 Input: {input_jsonl}")
+    log_info(f"🤖 Model: {model}")
+    log_info(f"⏱️  Timeout: {timeout_seconds}s")
+
+    # Run classification
+    results = score_file(
+        input_jsonl=input_jsonl,
+        output_jsonl=output_jsonl,
+        output_csv=output_csv,
+        model=model,
+        timeout_seconds=timeout_seconds,
+    )
+    
+    log_info(f"🎉 Pipeline completed! Processed {len(results)} domains")
 
 
-def main() -> None:
-    cli(standalone_mode=True)
 
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  # pragma: no cover
+    scorer()
 
 

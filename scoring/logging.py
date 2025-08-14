@@ -1,41 +1,20 @@
 """
-Purpose: Simple structured logging utilities for the scoring pipeline.
-Description: Writes compact JSON lines either to stdout or to a .jsonl file for later analysis.
-Key Functions/Classes: StructuredLogger, get_logger.
+Purpose: Minimal logging helper for the scoring package.
+Description: Provides `log_info` and `log_error` with consistent prefixing.
+Key Functions/Classes: `log_info`, `log_error`.
 """
 
 from __future__ import annotations
 
-import json
 import sys
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 
-def _iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def log_info(*args: Any) -> None:
+    print("[scoring]", *args, file=sys.stderr)
 
 
-@dataclass
-class StructuredLogger:
-    path: Optional[Path] = None
-
-    def log(self, event: str, **fields: Any) -> None:
-        payload: Dict[str, Any] = {"ts": _iso_now(), "event": event, **fields}
-        line = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-        if self.path is None:
-            sys.stdout.write(line + "\n")
-            sys.stdout.flush()
-            return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(line)
-            f.write("\n")
-
-
-def get_logger(path: Optional[str | Path] = None) -> StructuredLogger:
-    return StructuredLogger(path=Path(path) if path else None)
+def log_error(*args: Any) -> None:
+    print("[scoring][error]", *args, file=sys.stderr)
 
 
