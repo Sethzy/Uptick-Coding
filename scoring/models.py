@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
 import random
 import asyncio
 
@@ -30,13 +30,15 @@ def _build_prompt(aggregated_context: str, prompt_version: str) -> str:
         "- Maintenance & Service Only: Companies focused exclusively on ongoing upkeep and repair of existing systems; recurring inspections; service calls, testing, preventative maintenance.\n"
         "- Install Focus: Primarily design and installation of new systems for new construction or major renovations; project-based; higher revenue per project.\n"
         "- 50/50 Split: Balanced mix of new installations and ongoing service/maintenance.\n"
-        "- Other: Use only if none of the above clearly applies. When selecting Other, also provide a concise sublabel (3-6 words, e.g., 'Security company') and a 2-3 sentence definition explaining it.\n"
+        "- Other: Use only if none of the above clearly applies. (Sublabel/definition optional.)\n"
         "- Confidence: integer 0–100 indicating how sure you are about the assigned category.\n\n"
         "Schema (required JSON fields):\n"
         f"{schema_snippet}\n\n"
         "Rules:\n"
         "- Output ONLY a single JSON object with EXACTLY these fields. No prose, no markdown, no extra keys.\n"
-        "- If classification_category is 'Other', include both 'other_sublabel' (3-6 words) and 'other_sublabel_definition' (2-3 sentences).\n"
+        "- If classification_category is 'Other', you may include optional 'other_sublabel' and 'other_sublabel_definition'.\n"
+        "- Use double quotes for all JSON keys and string values.\n"
+        "- Do not include comments or trailing commas in the JSON.\n"
         "- Temperature: 0.\n\n"
         "Minimal example JSON (not evidence-based):\n"
         "{\n  \"classification_category\": \"Install Focus\",\n  \"confidence\": 80,\n  \"rationale\": \"Clear description of installation-focused services.\"\n}\n\n"
@@ -129,24 +131,104 @@ def _extract_content_text(raw_text: str) -> Tuple[str, Optional[Dict[str, Any]]]
 
 
 def _parse_model_json(text: str) -> Tuple[Optional[ModelClassification], Optional[str]]:
-    # Extract potential content from envelopes first
+    """Parse model JSON with recursive unwrapping of nested envelopes and error detection.
+
+    Strategy:
+    1) Extract message.content from the outer transport envelope (OpenRouter style).
+    2) Recursively unwrap up to max_depth when content itself is another envelope JSON.
+    3) Detect provider error payloads and return a clear error string.
+    4) Validate against ModelClassification when we reach an object with required keys.
+    """
+    REQUIRED_KEYS = {"classification_category", "confidence", "rationale"}
+
+    def _get_inner_content(obj: Dict[str, Any]) -> Optional[Any]:
+        # Try OpenAI/OpenRouter shape
+        choices = obj.get("choices")
+        if isinstance(choices, list) and choices:
+            msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+            if isinstance(msg, dict) and "content" in msg:
+                return msg.get("content")
+        return None
+
+    # Start by unwrapping the first envelope to content text
     content_text, _usage = _extract_content_text(text)
-    # Strip markdown fences if present
-    content_text = _strip_markdown_code_fences(content_text)
-    # Fast path: try to parse as-is
-    try:
-        data = json.loads(content_text)
-    except Exception as e:
-        # Try to extract a JSON object substring
-        extracted = _extract_json_object(content_text)
-        if extracted is None:
-            return None, f"json_parse_error: {e}"
+    # Attempt up to 3 unwrapping passes
+    max_depth = 3
+    for _ in range(max_depth):
+        if not isinstance(content_text, str):
+            # Some providers may return content as parts array
+            if isinstance(content_text, list):
+                parts: List[str] = []
+                # Pick text fields if any
+                for part in content_text:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        parts.append(part["text"])
+                    # If a JSON part exists, prefer it
+                    if isinstance(part, dict) and isinstance(part.get("json"), (dict, list)):
+                        try:
+                            data = part["json"]
+                            # Direct schema validation
+                            try:
+                                return ModelClassification.model_validate(data), None
+                            except Exception as e:
+                                return None, f"schema_validation_error: {e}"
+                        except Exception:
+                            pass
+                content_text = "".join(parts)
+            else:
+                # Unknown shape, bail to string conversion and continue
+                content_text = str(content_text)
+
+        # Normalize fences and whitespace
+        content_text = _strip_markdown_code_fences(content_text)
+        if not content_text.strip():
+            return None, "json_parse_error: empty_content"
+
+        # Try to load as JSON directly
         try:
-            data = json.loads(extracted)
-        except Exception as e2:
-            return None, f"json_parse_error: {e2}"
+            data = json.loads(content_text)
+        except Exception:
+            # Try to extract a JSON object substring
+            extracted = _extract_json_object(content_text)
+            if extracted is None:
+                break
+            try:
+                data = json.loads(extracted)
+            except Exception as e2:
+                return None, f"json_parse_error: {e2}"
+
+        # If data already matches required keys, validate and return
+        if isinstance(data, dict) and REQUIRED_KEYS.issubset(data.keys()):
+            try:
+                return ModelClassification.model_validate(data), None
+            except Exception as e:
+                return None, f"schema_validation_error: {e}"
+
+        # Detect provider error payloads
+        if isinstance(data, dict) and "error" in data:
+            err = data.get("error")
+            message = err.get("message") if isinstance(err, dict) else str(err)
+            code = err.get("code") if isinstance(err, dict) else None
+            code_part = f" (code {code})" if code is not None else ""
+            return None, f"provider_error:{code_part} {message}".strip()
+
+        # If looks like another envelope, unwrap inner content and loop
+        if isinstance(data, dict):
+            inner = _get_inner_content(data)
+            if inner is not None:
+                content_text = inner  # may be string or parts list; loop again
+                continue
+
+        # No more unwrapping possible
+        break
+
+    # Final attempt: if we reached here, try to validate last parsed object (if any)
     try:
-        return ModelClassification.model_validate(data), None
+        data  # type: ignore[name-defined]
+    except NameError:
+        return None, "json_parse_error: unable_to_extract_json"
+    try:
+        return ModelClassification.model_validate(data), None  # type: ignore[arg-type]
     except Exception as e:
         return None, f"schema_validation_error: {e}"
 
@@ -232,6 +314,10 @@ async def classify_domain_with_model(
 
     t0 = time.perf_counter()
     try:
+        # Optionally swap to DeepSeek direct endpoint
+        base_url = cfg.endpoint_base_url
+        if cfg.use_deepseek_direct:
+            base_url = "https://api.deepseek.com"
         resp = await _request_with_retries(client, cfg, prompt_payload)
         meta["request_ms"] = int((time.perf_counter() - t0) * 1000)
         raw_text = resp.text

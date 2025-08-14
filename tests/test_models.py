@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict
+import json
 
 import httpx
 import pytest
 
 from scoring.config import ScoringConfig
-from scoring.models import classify_domain_with_model
+from scoring.models import classify_domain_with_model, _parse_model_json
 
 
 class _MockTransport(httpx.AsyncBaseTransport):
@@ -49,5 +50,54 @@ async def test_invalid_then_invalid_sets_status():
         parsed, meta = await classify_domain_with_model(client, cfg, aggregated_context="CTX", prompt_version="v1")
     assert parsed is None
     assert meta["status"] in {"invalid_json", "unhandled_error"}
+
+
+def test_nested_envelope_unwraps():
+    # Outer envelope with content that is a JSON string of another envelope,
+    # whose message.content is the final classification JSON string.
+    inner_answer = '{"classification_category":"Install Focus","confidence":75,"rationale":"clear"}'
+    inner_env = {
+        "id": "gen-x",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": inner_answer,
+                }
+            }
+        ],
+    }
+    outer_env = {
+        "id": "gen-y",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps(inner_env),
+                }
+            }
+        ],
+    }
+    parsed, err = _parse_model_json(json.dumps(outer_env))
+    assert err is None
+    assert parsed is not None
+    assert parsed.classification_category == "Install Focus"
+
+
+def test_provider_error_detection():
+    env = {
+        "id": "gen-z",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps({"error": {"message": "Provider returned error", "code": 524}}),
+                }
+            }
+        ],
+    }
+    parsed, err = _parse_model_json(json.dumps(env))
+    assert parsed is None
+    assert err and err.startswith("provider_error")
 
 

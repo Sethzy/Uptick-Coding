@@ -40,6 +40,8 @@ class ScoringConfig:
     worker_count: int = 3
     retry: RetryPolicy = field(default_factory=RetryPolicy)
     endpoint_base_url: str = "https://openrouter.ai/api/v1"
+    # AIDEV-NOTE: Optional direct DeepSeek endpoint toggle via env or config override.
+    use_deepseek_direct: bool = False
 
 
 def _load_json_or_yaml(path: str) -> Dict:
@@ -93,6 +95,9 @@ def _apply_env_overrides(cfg: ScoringConfig) -> ScoringConfig:
     endpoint = os.getenv("OPENROUTER_ENDPOINT") or os.getenv("OPENAI_ENDPOINT")
     if endpoint:
         cfg.endpoint_base_url = endpoint.rstrip("/")
+    deepseek_direct = os.getenv("USE_DEEPSEEK_DIRECT")
+    if deepseek_direct is not None:
+        cfg.use_deepseek_direct = deepseek_direct.lower() in {"1", "true", "yes"}
     return cfg
 
 
@@ -126,6 +131,8 @@ def load_config_from_dict(data: Dict) -> ScoringConfig:
             base_delay_ms=int(r.get("base_delay_ms", cfg.retry.base_delay_ms)),
             max_delay_ms=int(r.get("max_delay_ms", cfg.retry.max_delay_ms)),
         )
+    if "use_deepseek_direct" in data:
+        cfg.use_deepseek_direct = bool(data["use_deepseek_direct"])
     return _apply_env_overrides(cfg)
 
 
