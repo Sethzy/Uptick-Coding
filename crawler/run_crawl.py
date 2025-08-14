@@ -76,7 +76,7 @@ def main() -> int:
     # CLI flags
     parser = argparse.ArgumentParser(description="Targeted domain crawler (PRD aligned)")
     parser.add_argument("--input-csv", default=os.getenv("INPUT_CSV", os.path.join(os.getcwd(), "uptick-csvs", "final_merged_hubspot_tam_data_resolved.csv")))
-    parser.add_argument("--output-jsonl", default=os.getenv("OUTPUT_JSONL", os.path.join(os.getcwd(), "raw-output.jsonl")))
+    parser.add_argument("--output-jsonl", default=os.getenv("OUTPUT_JSONL", os.path.join(os.getcwd(), "llm-input.jsonl")))
     parser.add_argument("--checkpoint", default=os.getenv("CHECKPOINT", os.path.join(os.getcwd(), ".crawl-checkpoint.json")))
     parser.add_argument("--from-index", type=int, default=int(os.getenv("FROM_INDEX", "0")))
     parser.add_argument("--limit", type=int, default=int(os.getenv("LIMIT", "0")))
@@ -136,22 +136,104 @@ def main() -> int:
 
         cp = load_checkpoint(args.checkpoint) if args.resume else {}
 
-        # AIDEV-NOTE: Also emit a filtered JSONL for LLM consumption next to raw-output
+        # AIDEV-NOTE: As per Aggregated Context PRD, emit a single JSONL with aggregated_context per domain
+        # The output shape replaces the previous llm-input.jsonl and raw records for downstream LLM use.
         run_dir = os.path.dirname(os.path.abspath(args.output_jsonl))
-        llm_input_path = os.path.join(run_dir, "llm-input.jsonl")
 
-        # Helper to produce the minimal LLM input record
-        def to_llm_input(domain: str, pages: List[Dict[str, Any]]) -> Dict[str, Any]:
-            out_pages: List[Dict[str, Any]] = []
-            for idx, p in enumerate(pages):
+        def _approx_tokens(chars: int) -> int:
+            try:
+                return max(0, int(round(chars / 4)))
+            except Exception:
+                return 0
+
+        def _normalize_page_text(text: str) -> str:
+            """
+            Normalization per PRD (subset):
+            - collapse repeated whitespace
+            - strip markdown link targets, keep anchor text [text](url) -> text
+            - normalize newlines to \n
+            Note: We intentionally avoid heavy transformations to preserve headings for citations.
+            """
+            import re
+            if not isinstance(text, str):
+                return ""
+            s = text.replace("\r\n", "\n").replace("\r", "\n")
+            # strip markdown link targets: [text](url) -> text
+            s = re.sub(r"\[([^\]]+)\]\((?:[^)]+)\)", r"\1", s)
+            # collapse whitespace (but keep single newlines)
+            s = re.sub(r"[\t\f\v ]+", " ", s)
+            s = re.sub(r"\n{3,}", "\n\n", s)
+            return s.strip()
+
+        def _build_aggregated_record(domain: str, pages: List[Dict[str, Any]], *, max_tokens: int | None, max_chars: int | None) -> Dict[str, Any]:
+            # Deterministic ordering: homepage first, others by (path length asc, URL asc)
+            ordered: List[Dict[str, Any]] = []
+            if pages:
+                homepage = pages[0]
+                others = pages[1:]
+                def _path_key(u: str) -> tuple[int, str]:
+                    from urllib.parse import urlparse
+                    try:
+                        path = urlparse(u).path or "/"
+                    except Exception:
+                        path = u or ""
+                    return (len(path), u)
+                others_sorted = sorted(others, key=lambda p: _path_key(p.get("url") or ""))
+                ordered = [homepage] + others_sorted
+
+            sections: List[str] = []
+            included_urls: List[str] = []
+            seen_normalized_texts: set[str] = set()
+            total_chars = 0
+            overflow = False
+
+            def _would_exceed(next_text: str) -> bool:
+                nonlocal total_chars
+                if max_chars is not None and max_chars > 0:
+                    return (total_chars + len(next_text)) > max_chars
+                if max_tokens is not None and max_tokens > 0:
+                    return (_approx_tokens(total_chars + len(next_text)) > max_tokens)
+                return False
+
+            for idx, p in enumerate(ordered):
                 url_val = p.get("url") or ""
                 if idx == 0:
-                    out_pages.append({"url": url_val, "markdown_scoped": p.get("markdown_scoped") or ""})
+                    raw_text = p.get("markdown_scoped") or ""
                 else:
-                    out_pages.append({"url": url_val, "markdown_fit": p.get("markdown_fit") or ""})
-            return {"domain": domain, "pages": out_pages}
+                    raw_text = p.get("markdown_fit") or ""
+                norm = _normalize_page_text(raw_text)
+                if not norm:
+                    continue
+                # deduplicate by normalized text
+                if norm in seen_normalized_texts:
+                    continue
+                header = f"### [PAGE] {url_val}\n"
+                section_text = header + norm
+                # add separation (two blank lines) when there are existing sections
+                if sections:
+                    section_text = "\n\n" + section_text
+                # budget check
+                if _would_exceed(section_text):
+                    overflow = True
+                    break
+                sections.append(section_text)
+                included_urls.append(url_val)
+                seen_normalized_texts.add(norm)
+                total_chars += len(section_text)
 
-        with open_jsonl(args.output_jsonl) as fh, open_jsonl(llm_input_path) as fh_llm:
+            aggregated_context = "".join(sections)
+            rec = {
+                "domain": domain,
+                "aggregated_context": aggregated_context,
+                "included_urls": included_urls,
+                "overflow": overflow,
+                "length": {"chars": len(aggregated_context), "approx_tokens": _approx_tokens(len(aggregated_context))},
+            }
+            return rec
+
+        raw_jsonl_path = os.path.join(run_dir, "raw-output.jsonl")
+
+        with open_jsonl(args.output_jsonl) as agg_fh, open_jsonl(raw_jsonl_path) as raw_fh:
             async with AsyncWebCrawler(config=browser) as crawler:
                 sem = asyncio.Semaphore(max(1, args.concurrency))
 
@@ -174,7 +256,9 @@ def main() -> int:
                     )
                     if not canonical_url:
                         reason = "DNS_FAIL"
-                        rec = {
+                        # Emit aggregated record with empty context for failed domain
+                        # Write raw record (failure)
+                        raw_rec = {
                             "domain": domain,
                             "canonical_url": "",
                             "crawler_status": "FAIL",
@@ -183,8 +267,16 @@ def main() -> int:
                             "crawl_ts": datetime.now(timezone.utc).isoformat(),
                             "pages": [],
                         }
-                        write_record(fh, rec)
-                        write_record(fh_llm, to_llm_input(domain, rec.get("pages", []) or []))
+                        write_record(raw_fh, raw_rec)
+
+                        agg_rec = {
+                            "domain": domain,
+                            "aggregated_context": "",
+                            "included_urls": [],
+                            "overflow": False,
+                            "length": {"chars": 0, "approx_tokens": 0},
+                        }
+                        write_record(agg_fh, agg_rec)
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
@@ -208,7 +300,7 @@ def main() -> int:
                     overrides = set(cfg.get("robots_overrides", []))
                     if (respect_robots and not sampling_ignore_robots) and (domain not in overrides) and await is_robot_disallowed(canonical_url):
                         reason = "ROBOT_DISALLOW"
-                        rec = {
+                        raw_rec = {
                             "domain": domain,
                             "canonical_url": canonical_url,
                             "crawler_status": "SKIPPED",
@@ -217,8 +309,16 @@ def main() -> int:
                             "crawl_ts": datetime.now(timezone.utc).isoformat(),
                             "pages": [],
                         }
-                        write_record(fh, rec)
-                        write_record(fh_llm, to_llm_input(domain, rec.get("pages", []) or []))
+                        write_record(raw_fh, raw_rec)
+
+                        agg_rec = {
+                            "domain": domain,
+                            "aggregated_context": "",
+                            "included_urls": [],
+                            "overflow": False,
+                            "length": {"chars": 0, "approx_tokens": 0},
+                        }
+                        write_record(agg_fh, agg_rec)
                         retry += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "SKIPPED", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
@@ -277,7 +377,7 @@ def main() -> int:
                         result = await crawler.arun(url=canonical_url, config=run)
                     except Exception:
                         reason = "TIMEOUT"
-                        rec = {
+                        raw_rec = {
                             "domain": domain,
                             "canonical_url": canonical_url,
                             "crawler_status": "FAIL",
@@ -286,8 +386,16 @@ def main() -> int:
                             "crawl_ts": datetime.now(timezone.utc).isoformat(),
                             "pages": [],
                         }
-                        write_record(fh, rec)
-                        write_record(fh_llm, to_llm_input(domain, rec.get("pages", []) or []))
+                        write_record(raw_fh, raw_rec)
+
+                        agg_rec = {
+                            "domain": domain,
+                            "aggregated_context": "",
+                            "included_urls": [],
+                            "overflow": False,
+                            "length": {"chars": 0, "approx_tokens": 0},
+                        }
+                        write_record(agg_fh, agg_rec)
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
@@ -476,7 +584,7 @@ def main() -> int:
                     has_any_content = any(((p.get("markdown_scoped") or p.get("markdown_raw") or p.get("markdown_fit"))) for p in pages)
                     if not has_any_content:
                         reason = "EMPTY_CONTENT"
-                        rec = {
+                        raw_rec = {
                             "domain": domain,
                             "canonical_url": canonical_url,
                             "crawler_status": "FAIL",
@@ -485,8 +593,16 @@ def main() -> int:
                             "crawl_ts": datetime.now(timezone.utc).isoformat(),
                             "pages": pages,
                         }
-                        write_record(fh, rec)
-                        write_record(fh_llm, to_llm_input(domain, rec.get("pages", []) or []))
+                        write_record(raw_fh, raw_rec)
+
+                        agg_rec = {
+                            "domain": domain,
+                            "aggregated_context": "",
+                            "included_urls": [],
+                            "overflow": False,
+                            "length": {"chars": 0, "approx_tokens": 0},
+                        }
+                        write_record(agg_fh, agg_rec)
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=len(pages))
@@ -496,7 +612,23 @@ def main() -> int:
                         await asyncio.sleep(jitter_delay_seconds(dcfg.get("min", 1.5), dcfg.get("max", 2.0), dcfg.get("jitter", 0.4)))
                         return
 
-                    rec = {
+                    # Build aggregated context per PRD
+                    max_tokens_cfg = None
+                    max_chars_cfg = None
+                    # Read budgeting config if present
+                    if "max_tokens" in cfg:
+                        try:
+                            max_tokens_cfg = int(cfg.get("max_tokens"))
+                        except Exception:
+                            max_tokens_cfg = None
+                    if "max_chars" in cfg:
+                        try:
+                            max_chars_cfg = int(cfg.get("max_chars"))
+                        except Exception:
+                            max_chars_cfg = None
+
+                    # Write raw detailed record
+                    raw_rec = {
                         "domain": domain,
                         "canonical_url": canonical_url,
                         "crawler_status": "OK" if getattr(result, "success", True) else "FAIL",
@@ -505,8 +637,11 @@ def main() -> int:
                         "crawl_ts": datetime.now(timezone.utc).isoformat(),
                         "pages": pages,
                     }
-                    write_record(fh, rec)
-                    write_record(fh_llm, to_llm_input(domain, rec.get("pages", []) or []))
+                    write_record(raw_fh, raw_rec)
+
+                    # Write aggregated record
+                    agg_rec = _build_aggregated_record(domain, pages, max_tokens=max_tokens_cfg, max_chars=max_chars_cfg)
+                    write_record(agg_fh, agg_rec)
                     ok += 1
                     elapsed_ms = int((time.time() - start_ms) * 1000)
                     log_progress(logger, domain, "OK", elapsed_ms=elapsed_ms, pages_visited=len(pages))

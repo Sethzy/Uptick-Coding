@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Markdown Comparison UI</title>
+    <link rel="preconnect" href="https://unpkg.com" />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        line-height: 1.4;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        background: Canvas;
+        border-bottom: 1px solid rgb(0 0 0 / 10%);
+        padding: 16px;
+        z-index: 10;
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 28px;
+      }
+      .sub {
+        margin: 0 0 16px 0;
+        opacity: 0.75;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      select,
+      button {
+        font: inherit;
+        padding: 8px 10px;
+        border: 1px solid rgb(0 0 0 / 20%);
+        border-radius: 8px;
+        background: Field;
+        color: FieldText;
+      }
+      main {
+        padding: 16px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      @media (max-width: 1100px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .card {
+        border: 1px solid rgb(0 0 0 / 12%);
+        border-radius: 12px;
+        background: Canvas;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        min-height: 200px;
+      }
+      .card h2 {
+        margin: 0;
+        padding: 12px 14px;
+        border-bottom: 1px solid rgb(0 0 0 / 10%);
+        font-size: 20px;
+      }
+      .card .content {
+        padding: 12px 14px;
+        overflow: auto;
+        max-height: calc(100vh - 240px);
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        font-size: 12.5px;
+      }
+      .muted {
+        opacity: 0.65;
+        font-size: 13px;
+      }
+      .foot {
+        margin-top: 8px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .pill {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: color-mix(in oklab, CanvasText 10%, Canvas 90%);
+        font-size: 12px;
+        opacity: 0.8;
+      }
+      .sr-only {
+        position: absolute;
+        left: -9999px;
+      }
+      .rendered :is(h1, h2, h3) {
+        margin-top: 1.2em;
+      }
+      .rendered img {
+        max-width: 100%;
+        height: auto;
+      }
+      .rendered blockquote {
+        border-left: 4px solid rgb(0 0 0 / 15%);
+        margin: 8px 0;
+        padding: 4px 10px;
+        opacity: 0.9;
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Markdown Preview</h1>
+      <p class="sub">
+        A side-by-side comparison of the different markdown formats.
+      </p>
+      <div class="row">
+        <label for="pageSelect"><strong>Select Company:</strong></label>
+        <select id="pageSelect" aria-label="Select page"></select>
+        <span class="pill" id="statsPill" aria-live="polite"></span>
+        <span class="muted" id="hint"
+          >Rendering only applies to "Markdown Fit".</span
+        >
+      </div>
+    </header>
+    <main>
+      <section class="grid">
+        <article class="card">
+          <h2>Markdown Scoped</h2>
+          <div class="content">
+            <pre id="scopedText"></pre>
+            <div class="foot">
+              <span class="muted">Key: <code>markdown_scoped</code></span>
+              <div class="toolbar">
+                <button id="copyScoped">Copy</button>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Markdown Fit (Rendered)</h2>
+          <div class="content rendered" id="fitRendered"></div>
+          <div class="foot" style="padding: 0 14px 12px">
+            <span class="muted">Key: <code>markdown_fit</code></span>
+            <div class="toolbar">
+              <button id="copyFit">Copy source</button>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Raw Markdown</h2>
+          <div class="content">
+            <pre id="rawText"></pre>
+            <div class="foot">
+              <span class="muted">Key: <code>markdown_raw</code></span>
+              <div class="toolbar">
+                <button id="copyRaw">Copy</button>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <!-- Marked for rendering markdown_fit -->
+    <script src="https://unpkg.com/marked@12/marked.min.js"></script>
+    <script>
+      const state = { data: [], currentIndex: 0 };
+
+      async function loadData() {
+        // AIDEV-NOTE: Accepts JSONL of domain-level records; aggregates per company across pages
+        const candidates = [
+          "../10-sample-confirmation/raw-output.jsonl",
+          "/10-sample-confirmation/raw-output.jsonl",
+        ];
+        let res = null;
+        let lastErr = null;
+        for (const url of candidates) {
+          try {
+            const r = await fetch(url);
+            if (r.ok) {
+              res = r;
+              break;
+            } else lastErr = new Error(`Failed to load ${url}: ${r.status}`);
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+        if (!res) throw lastErr || new Error("Failed to load raw-output.jsonl");
+
+        const text = await res.text();
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        const records = lines.map((line) => JSON.parse(line));
+
+        // AIDEV-NOTE: Build clear per-page separators for visibility across panels
+        const companies = records.map((rec) => {
+          const pages = Array.isArray(rec.pages) ? rec.pages : [];
+
+          const scopedParts = [];
+          const rawParts = [];
+          const fitParts = [];
+          for (let i = 0; i < pages.length; i++) {
+            const p = pages[i] || {};
+            const idx = i + 1;
+            const title = p.title || "";
+            const url = p.url || "";
+
+            const asciiHeader = `\n\n================ [PAGE ${idx}] ================\n`;
+            const asciiMeta = `${title ? title + "\n" : ""}${
+              url ? url + "\n" : ""
+            }`;
+
+            // Preformatted panels: obvious ASCII separators
+            scopedParts.push(
+              `${asciiHeader}${asciiMeta}\n${p.markdown_scoped || ""}`
+            );
+            rawParts.push(
+              `${asciiHeader}${asciiMeta}\n${p.markdown_raw || ""}`
+            );
+
+            // Rendered panel: markdown heading + horizontal rule
+            const fitContent =
+              p.markdown_fit ?? p.markdown_scoped ?? p.markdown_raw ?? "";
+            const urlMd = url ? `\n${url}` : "";
+            fitParts.push(
+              `\n\n---\n\n### [PAGE ${idx}] ${
+                title || ""
+              }${urlMd}\n\n${fitContent}`
+            );
+          }
+
+          const scoped = scopedParts.join("\n");
+          const raw = rawParts.join("\n");
+          const fit = fitParts.join("\n");
+
+          let label = rec?.domain || "";
+          if (!label) {
+            const firstUrl = rec?.canonical_url || pages?.[0]?.url || "";
+            try {
+              if (firstUrl) label = new URL(firstUrl).hostname || firstUrl;
+            } catch {
+              label = firstUrl || pages?.[0]?.title || "Company";
+            }
+          }
+
+          return {
+            label,
+            markdown_scoped: scoped || "",
+            markdown_raw: raw || "",
+            markdown_fit: fit || "",
+            pagesCount: pages.length || 0,
+          };
+        });
+
+        if (!Array.isArray(companies) || companies.length === 0)
+          throw new Error("No companies found in raw-output.jsonl");
+
+        state.data = companies;
+      }
+
+      function el(id) {
+        return document.getElementById(id);
+      }
+
+      function updateStats(item) {
+        const scopedLen = (item.markdown_scoped || "").length;
+        const fitLen = (item.markdown_fit || "").length;
+        const rawLen = (item.markdown_raw || "").length;
+        el("statsPill").textContent = `Pages: ${Number(
+          item.pagesCount || 0
+        )} • Scoped: ${scopedLen.toLocaleString()} • Fit: ${fitLen.toLocaleString()} • Raw: ${rawLen.toLocaleString()}`;
+      }
+
+      function render(index) {
+        const item = state.data[index];
+        state.currentIndex = index;
+
+        // Populate text panels
+        el("scopedText").textContent = item.markdown_scoped || "";
+        el("rawText").textContent = item.markdown_raw || "";
+
+        // Render markdown_fit
+        const fit = item.markdown_fit || "";
+        try {
+          el("fitRendered").innerHTML = marked.parse(fit);
+        } catch (e) {
+          el("fitRendered").innerHTML = `<pre>${fit.replace(
+            /[&<>]/g,
+            (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])
+          )}</pre>`;
+        }
+
+        updateStats(item);
+      }
+
+      function populateSelect() {
+        const select = el("pageSelect");
+        select.innerHTML = "";
+        state.data.forEach((item, idx) => {
+          const opt = document.createElement("option");
+          const label =
+            item.label || item.title || item.url || `Company ${idx + 1}`;
+          opt.value = String(idx);
+          opt.textContent = label;
+          select.appendChild(opt);
+        });
+        select.value = "0";
+        select.addEventListener("change", (e) =>
+          render(Number(e.target.value))
+        );
+      }
+
+      function wireCopyButtons() {
+        el("copyScoped").addEventListener("click", async () => {
+          const txt = state.data[state.currentIndex]?.markdown_scoped || "";
+          await navigator.clipboard.writeText(txt);
+        });
+        el("copyFit").addEventListener("click", async () => {
+          const txt = state.data[state.currentIndex]?.markdown_fit || "";
+          await navigator.clipboard.writeText(txt);
+        });
+        el("copyRaw").addEventListener("click", async () => {
+          const txt = state.data[state.currentIndex]?.markdown_raw || "";
+          await navigator.clipboard.writeText(txt);
+        });
+      }
+
+      (async function init() {
+        try {
+          await loadData();
+          populateSelect();
+          wireCopyButtons();
+          render(0);
+        } catch (err) {
+          document.body.innerHTML = `<pre style="padding:16px">${String(
+            err
+          )}</pre>`;
+          console.error(err);
+        }
+      })();
+    </script>
+  </body>
+</html>

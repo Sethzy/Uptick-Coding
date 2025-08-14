@@ -1,0 +1,9 @@
+# Purpose: Minimal dependencies for scoring pipeline v1
+# Description: Keep deps light for initial MLS; expand only as needed.
+
+httpx>=0.27.0
+click>=8.1.7
+pydantic>=2.8.2
+python-dotenv>=1.0.1
+
+

@@ -1,8 +1,9 @@
 """
-Purpose: Generate human-readable Markdown summaries for crawl runs.
-Description: Reads domain-level records from a JSONL output file and renders a
-             Markdown report with an overview table and per-domain details that
-             mirror the `crawl-runs/<run>/output.md` example structure.
+Purpose: Generate human-readable Markdown summaries for aggregated context runs.
+Description: Reads aggregated per-domain JSONL records (domain, aggregated_context,
+             included_urls, overflow, length) and renders a concise Markdown report
+             with an overview table and per-domain details. This version assumes the
+             new Aggregated Context Builder output shape (no backward compatibility).
 Key Functions: generate_markdown_report
 
 AIDEV-NOTE: Keep formatting stable for downstream diffing and human review.
@@ -42,17 +43,20 @@ def _overview_table(records_by_domain: Dict[str, Dict], ordered_domains: Sequenc
     lines: List[str] = []
     lines.append("### Overview")
     lines.append("")
-    lines.append("| Domain | Status | Reason | Pages | Canonical URL |")
-    lines.append("| --- | --- | --- | --- | --- |")
+    lines.append("| Domain | Included URLs | Overflow | Length (chars) | Approx tokens |")
+    lines.append("| --- | ---: | --- | ---: | ---: |")
     for domain in ordered_domains:
         rec = records_by_domain.get(domain)
         if rec is None:
             continue
-        status = rec.get("crawler_status", "")
-        reason = rec.get("crawler_reason", "") or ""
-        pages = int(rec.get("crawl_pages_visited", 0) or 0)
-        can = rec.get("canonical_url", "") or ""
-        lines.append(f"| {domain} | {status} | {reason} | {pages} | {can} |")
+        included_urls = rec.get("included_urls") or []
+        if not isinstance(included_urls, list):
+            included_urls = []
+        overflow = bool(rec.get("overflow", False))
+        length = rec.get("length") or {}
+        chars = int((length.get("chars") or 0) if isinstance(length, dict) else 0)
+        toks = int((length.get("approx_tokens") or 0) if isinstance(length, dict) else 0)
+        lines.append(f"| {domain} | {len(included_urls)} | {overflow} | {chars} | {toks} |")
     lines.append("")
     return lines
 
@@ -65,46 +69,29 @@ def _per_domain_details(records_by_domain: Dict[str, Dict], ordered_domains: Seq
             continue
         out.append("")
         out.append(f"### {domain}")
-        status = rec.get("crawler_status", "")
-        reason = rec.get("crawler_reason", "")
-        if not reason:
-            reason_pretty = "-"
-        else:
-            reason_pretty = str(reason)
-        pages_visited = int(rec.get("crawl_pages_visited", 0) or 0)
-        canonical_url = rec.get("canonical_url", "") or ""
-        crawl_ts = rec.get("crawl_ts", "") or ""
+        included_urls = rec.get("included_urls") or []
+        if not isinstance(included_urls, list):
+            included_urls = []
+        overflow = bool(rec.get("overflow", False))
+        length = rec.get("length") or {}
+        chars = int((length.get("chars") or 0) if isinstance(length, dict) else 0)
+        toks = int((length.get("approx_tokens") or 0) if isinstance(length, dict) else 0)
         out.append("")
-        out.append(f"- **status**: {status}")
-        out.append(f"- **reason**: {reason_pretty}")
-        out.append(f"- **pages_visited**: {pages_visited}")
-        out.append(f"- **canonical_url**: {canonical_url}")
-        out.append(f"- **crawl_ts**: {crawl_ts}")
+        out.append(f"- **included_urls_count**: {len(included_urls)}")
+        out.append(f"- **overflow**: {overflow}")
+        out.append(f"- **length.chars**: {chars}")
+        out.append(f"- **length.approx_tokens**: {toks}")
 
-        pages = rec.get("pages", []) or []
-        if not isinstance(pages, list) or len(pages) == 0:
-            continue
+        if included_urls:
+            out.append("  - included_urls:")
+            for u in included_urls:
+                out.append(f"    - {u}")
 
-        for idx, p in enumerate(pages, start=1):
-            url = p.get("url", "") or ""
-            title = _safe_title(p.get("title"))
-            text_len = int(p.get("text_length", 0) or 0)
-            headings = p.get("headings") or []
-            md_scoped = p.get("markdown_scoped") or ""
-            md_raw = p.get("markdown_raw") or ""
-            out.append(f"  - Page {idx}: {url}")
-            out.append(f"    - title: {title}")
-            out.append(f"    - text_length: {text_len}")
-            if isinstance(headings, list) and len(headings) > 0:
-                joined = ", ".join(str(h) for h in headings if isinstance(h, str) and h.strip())
-                if joined:
-                    out.append(f"    - headings: {joined}")
-            scoped_sample = _content_sample(md_scoped)
-            raw_sample = _content_sample(md_raw)
-            if scoped_sample:
-                out.append(f"    - content_sample_scoped: {scoped_sample}")
-            if raw_sample:
-                out.append(f"    - content_sample_raw: {raw_sample}")
+        agg = rec.get("aggregated_context") or ""
+        sample = _content_sample(str(agg))
+        if sample:
+            out.append("  - aggregated_context_sample:")
+            out.append(f"    {sample}")
     return out
 
 
@@ -150,8 +137,8 @@ def generate_markdown_report(output_jsonl_path: str, input_csv_path: str) -> str
     lines: List[str] = []
     lines.append("<!--")
     lines.append("/**")
-    lines.append(" * Purpose: Human-readable summary of batch raw-output.jsonl")
-    lines.append(" * Description: Summarizes domain crawl outcomes and key page data for quick verification.")
+    lines.append(" * Purpose: Human-readable summary of aggregated output.jsonl")
+    lines.append(" * Description: Summarizes aggregated context shape for quick verification.")
     lines.append(" * Key Sections: Overview table; Per-domain details")
     lines.append(" */")
     lines.append("-->")
