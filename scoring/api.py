@@ -138,6 +138,7 @@ def score_domain(
                     domain=domain,
                     classification_category=obj.get("classification_category", "Other"),
                     rationale=obj.get("rationale", "No rationale provided"),
+                    record_id=item.record_id if hasattr(item, 'record_id') else None,
                 )
             except httpx.HTTPStatusError as e:
                 if 400 <= e.response.status_code < 500 and e.response.status_code not in (429,):

@@ -21,3 +21,4 @@
 - [ ] 5.0 Light observability: log counts for `invalid_json`, `provider_error`, request latency
 - [ ] 6.0 Update docs/CLI help to mention strict JSON mode and statuses
 - [ ] 7.0 Run a 3-domain sample and review outputs
+

@@ -20,6 +20,7 @@ class ClassificationResult(BaseModel):
     domain: str
     classification_category: str
     rationale: str
+    record_id: Optional[str] = None
 
 
 class LlmInput(BaseModel):
