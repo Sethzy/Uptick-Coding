@@ -15,9 +15,9 @@ from typing import Iterable, List, Optional
 
 import httpx
 
-from .models import ClassificationResult, LlmInput
+from .models import ClassificationResult, LlmInput, LabeledDatasetRecord, LabeledDatasetResult
 from .config import get_openrouter_api_key, get_openrouter_endpoint
-from .io_jsonl import iter_llm_inputs_from_jsonl, write_results_jsonl
+from .io_jsonl import iter_llm_inputs_from_jsonl, write_results_jsonl, iter_labeled_dataset_from_jsonl, write_labeled_results_jsonl
 from .io_csv import write_results_csv
 from .logging import log_info, log_error
 
@@ -51,6 +51,7 @@ def _build_prompt(aggregated_context: str) -> dict:
         "  - \"Install Only\"\n"
         "  - \"50/50 Split\"\n"
         "  - \"Other\"\n"
+        "  - \"Not Classifiable\"\n"
         "\n"
         "Detailed Classification Criteria:\n"
         "\n"
@@ -80,16 +81,37 @@ def _build_prompt(aggregated_context: str) -> dict:
         "   - Highly diverse jobs from small single-item services to complex specialized equipment\n"
         "   - Not directly related to large-scale water-based suppression systems or general recurring maintenance\n"
         "\n"
+        "5. NOT CLASSIFIABLE:\n"
+        "   - Use when website data is insufficient or contains no useful business information\n"
+        "   - Cases include: blank/empty aggregated context, website scrape failures\n"
+        "   - Websites showing 'Coming Soon', 'Under Construction', or placeholder content\n"
+        "   - Content that doesn't mention fire protection services, business activities, or company focus\n"
+        "   - RULE: Classify here if aggregated_context is empty, very short (<50 chars), or contains no business-relevant information\n"
+        "\n"
+        "Website Investment Quality Levels:\n"
+        "Poor:\n"
+        "Pages: 1 page\n"
+        "Indicators: Basic placeholder, minimal content, \"Coming Soon\" sites\n"
+        "Average:\n"
+        "Pages: 1-2 pages\n"
+        "Indicators: Basic company info, some service descriptions, functional but minimal\n"
+        "High Quality:\n"
+        "Pages: 3+ pages\n"
+        "Indicators: Comprehensive website with multiple sections, detailed content, strong online presence\n\n"
         "Schema:\n"
         "{\n"
-        "  \"classification_category\": \"Maintenance & Service Only|Install Only|50/50 Split|Other\",\n"
-        "  \"rationale\": \"Brief explanation of why this classification was chosen based on the website content\"\n"
+        "  \"classification_category\": \"Maintenance & Service Only|Install Only|50/50 Split|Other|Not Classifiable\",\n"
+        "  \"rationale\": \"Brief explanation of why this classification was chosen based on the website content\",\n"
+        "  \"website_quality\": \"Poor|Average|High Quality\"\n"
         "}\n"
         "Rules:\n"
         "- Temperature: 0. Output JSON only.\n"
         "- Provide a clear, concise rationale (2-3 sentences max).\n"
         "- Apply the automatic classification rules strictly.\n"
-        "- Consider the overall business focus, not just individual mentions.\n\n"
+        "- Consider the overall business focus, not just individual mentions.\n"
+        "- If aggregated_context is empty or contains no useful business information, classify as 'Not Classifiable'.\n"
+        "- Website quality should be determined based on the number of pages and content depth in the aggregated context.\n"
+        "- Website quality assessment is independent of business classification - a \"Poor\" quality site can still be classified into any business category if sufficient information exists.\n\n"
         f"Context (Aggregated):\n{aggregated_context}"
     )
     return {
@@ -147,6 +169,7 @@ def score_domain(
     *,
     domain: str,
     aggregated_context: str,
+    record_id: Optional[str] = None,
     model: str = "qwen/qwen3-30b-a3b",
     timeout_seconds: int = 90,
 ) -> ClassificationResult:
@@ -169,7 +192,7 @@ def score_domain(
                     domain=domain,
                     classification_category=obj.get("classification_category", "Other"),
                     rationale=obj.get("rationale", "No rationale provided"),
-                    record_id=item.record_id if hasattr(item, 'record_id') else None,
+                    record_id=record_id,
                 )
             except httpx.HTTPStatusError as e:
                 if 400 <= e.response.status_code < 500 and e.response.status_code not in (429,):
@@ -211,6 +234,7 @@ def score_file(
             result = score_domain(
                 domain=item.domain,
                 aggregated_context=item.aggregated_context,
+                record_id=getattr(item, 'record_id', None),
                 model=model,
                 timeout_seconds=timeout_seconds,
             )
@@ -228,6 +252,78 @@ def score_file(
     if output_csv:
         log_info(f"Writing CSV to: {output_csv}")
         write_results_csv(output_csv, results)
+
+    return results
+
+
+def score_labeled_domain(
+    *,
+    record: LabeledDatasetRecord,
+    model: str = "qwen/qwen3-30b-a3b",
+    timeout_seconds: int = 90,
+) -> LabeledDatasetResult:
+    """Score a single labeled dataset record using only the aggregated_context field."""
+    # Extract only aggregated_context for scoring
+    classification_result = score_domain(
+        domain=record.domain,
+        aggregated_context=record.aggregated_context,
+        record_id=record.record_id,
+        model=model,
+        timeout_seconds=timeout_seconds,
+    )
+    
+    # Create result with all original fields plus classification
+    return LabeledDatasetResult(
+        domain=record.domain,
+        aggregated_context=record.aggregated_context,
+        included_urls=record.included_urls,
+        overflow=record.overflow,
+        length=record.length,
+        record_id=record.record_id,
+        lead_status=record.lead_status,
+        clay_score=record.clay_score,
+        associated_note=record.associated_note,
+        current_software=record.current_software,
+        core_service=record.core_service,
+        classification_category=classification_result.classification_category,
+        rationale=classification_result.rationale,
+    )
+
+
+def score_labeled_file(
+    *,
+    input_jsonl: str,
+    output_jsonl: Optional[str] = None,
+    model: str = "qwen/qwen3-30b-a3b",
+    timeout_seconds: int = 90,
+) -> List[LabeledDatasetResult]:
+    """Score a labeled dataset file, preserving all original fields and adding classification results."""
+    records = list(iter_labeled_dataset_from_jsonl(input_jsonl))
+    
+    log_info(f"Starting classification of {len(records)} labeled dataset records using model: {model}")
+    log_info(f"Output: JSONL={output_jsonl or 'none'}")
+    log_info("🔒 Only 'aggregated_context' field will be used for classification")
+
+    results: List[LabeledDatasetResult] = []
+    for i, record in enumerate(records, 1):
+        log_info(f"\n[{i}/{len(records)}] Processing domain: {record.domain}")
+        try:
+            result = score_labeled_domain(
+                record=record,
+                model=model,
+                timeout_seconds=timeout_seconds,
+            )
+            results.append(result)
+        except Exception as e:
+            log_error(f"Failed to process {record.domain}: {e}")
+            # Continue with next record instead of failing completely
+            continue
+
+    log_info(f"\n✅ Completed {len(results)}/{len(records)} records successfully")
+    
+    if output_jsonl:
+        log_info(f"Writing labeled results to: {output_jsonl}")
+        write_labeled_results_jsonl(output_jsonl, results)
 
     return results
 

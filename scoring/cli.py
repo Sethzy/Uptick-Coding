@@ -1,7 +1,7 @@
 """
 Purpose: CLI for the lightweight LLM scoring pipeline.
-Description: Provides a `scorer classify` command to read aggregated-context
-JSONL, call the LLM, and write JSONL/CSV outputs.
+Description: Provides a `scorer classify` command to read labeled dataset
+JSONL, call the LLM, and write JSONL outputs.
 Key Functions/Classes: Click entrypoints `scorer` and `classify`.
 """
 
@@ -12,7 +12,7 @@ from typing import Optional
 
 import click
 
-from .api import score_file
+from .api import score_labeled_file
 from .config import get_openrouter_api_key
 from .logging import log_info
 
@@ -28,30 +28,27 @@ def scorer() -> None:
 @scorer.command()
 @click.option("--input-jsonl", required=True, type=click.Path(exists=True, dir_okay=False))
 @click.option("--output-jsonl", required=False, type=click.Path(dir_okay=False))
-@click.option("--output-csv", required=False, type=click.Path(dir_okay=False))
 @click.option("--model", default="qwen/qwen3-30b-a3b", show_default=True)
 @click.option("--timeout-seconds", default=90, type=int, show_default=True)
 def classify(
     input_jsonl: str,
     output_jsonl: Optional[str],
-    output_csv: Optional[str],
     model: str,
     timeout_seconds: int,
 ) -> None:
-    """Classify domains using aggregated context JSONL input and write outputs."""
+    """Classify domains from labeled dataset using only aggregated_context field."""
     if not get_openrouter_api_key():
         raise click.ClickException("OpenRouter key not found (set OPENROUTER_API_KEY or OPENROUTER_KEY, or .env)")
 
-    log_info("🚀 Starting domain classification pipeline")
+    log_info("🚀 Starting labeled dataset classification pipeline")
     log_info(f"📁 Input: {input_jsonl}")
     log_info(f"🤖 Model: {model}")
     log_info(f"⏱️  Timeout: {timeout_seconds}s")
 
     # Run classification
-    results = score_file(
+    results = score_labeled_file(
         input_jsonl=input_jsonl,
         output_jsonl=output_jsonl,
-        output_csv=output_csv,
         model=model,
         timeout_seconds=timeout_seconds,
     )
