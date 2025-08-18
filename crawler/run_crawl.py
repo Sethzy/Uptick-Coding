@@ -23,19 +23,19 @@ except Exception:  # pragma: no cover
     def load_dotenv(*_args, **_kwargs):  # fallback if not available
         return False
 
-from .logging import get_logger, log_event, log_progress, log_summary
-from .reachability import load_domains_from_csv, load_domain_id_pairs_from_csv
-from .session import stable_session_id
-from .canonical import canonicalize_domain, is_robot_disallowed
-from .politeness import jitter_delay_seconds
-from .output_writer import open_jsonl, write_record
-from .report_md import generate_markdown_report
-from .extraction import make_page_record
-from .link_selection import (
+from crawler_logging import get_logger, log_event, log_progress, log_summary
+from reachability import load_domains_from_csv, load_domain_id_pairs_from_csv
+from session import stable_session_id
+from canonical import canonicalize_domain, is_robot_disallowed
+from politeness import jitter_delay_seconds
+from output_writer import open_jsonl, write_record
+from report_md import generate_markdown_report
+from extraction import make_page_record
+from link_selection import (
     extract_anchors_from_html,
     select_links_simple,
 )
-from .checkpoint import load_checkpoint, save_checkpoint, mark_attempt, mark_success
+from checkpoint import load_checkpoint, save_checkpoint, mark_attempt, mark_success
 
 import asyncio
 import json
@@ -88,7 +88,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # Runtime config
-    cfg_path = os.path.join(os.getcwd(), "crawler", "config.json")
+    cfg_path = os.path.join(os.getcwd(), "config.json")
     with open(cfg_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
 
@@ -209,18 +209,25 @@ def main() -> int:
                 total_chars += len(section_text)
 
             aggregated_context = "".join(sections)
+            
+            # Aggregate HTML keywords from all pages
+            all_html_keywords = set()
+            for p in pages:
+                page_html_keywords = p.get("html_keywords_found", [])
+                if isinstance(page_html_keywords, list):
+                    all_html_keywords.update(page_html_keywords)
+            
             rec = {
                 "domain": domain,
                 "aggregated_context": aggregated_context,
                 "included_urls": included_urls,
                 "overflow": overflow,
                 "length": {"chars": len(aggregated_context), "approx_tokens": _approx_tokens(len(aggregated_context))},
+                "html_keywords_found": sorted(list(all_html_keywords)),
             }
             return rec
 
-        raw_jsonl_path = os.path.join(run_dir, "raw-output.jsonl")
-
-        with open_jsonl(args.output_jsonl) as agg_fh, open_jsonl(raw_jsonl_path) as raw_fh:
+        with open_jsonl(args.output_jsonl) as agg_fh:
             async with AsyncWebCrawler(config=browser) as crawler:
                 sem = asyncio.Semaphore(max(1, args.concurrency))
 
@@ -246,18 +253,7 @@ def main() -> int:
                     if not canonical_url:
                         reason = "DNS_FAIL"
                         # Emit aggregated record with empty context for failed domain
-                        # Write raw record (failure)
-                        raw_rec = {
-                            "domain": domain,
-                            "record_id": record_id,
-                            "canonical_url": "",
-                            "crawler_status": "FAIL",
-                            "crawler_reason": reason,
-                            "crawl_pages_visited": 0,
-                            "crawl_ts": datetime.now(timezone.utc).isoformat(),
-                            "pages": [],
-                        }
-                        write_record(raw_fh, raw_rec)
+                        # Prepare aggregated record (failure)
 
                         agg_rec = {
                             "domain": domain,
@@ -291,17 +287,6 @@ def main() -> int:
                     overrides = set(cfg.get("robots_overrides", []))
                     if (respect_robots and not sampling_ignore_robots) and (domain not in overrides) and await is_robot_disallowed(canonical_url):
                         reason = "ROBOT_DISALLOW"
-                        raw_rec = {
-                            "domain": domain,
-                            "record_id": record_id,
-                            "canonical_url": canonical_url,
-                            "crawler_status": "SKIPPED",
-                            "crawler_reason": reason,
-                            "crawl_pages_visited": 0,
-                            "crawl_ts": datetime.now(timezone.utc).isoformat(),
-                            "pages": [],
-                        }
-                        write_record(raw_fh, raw_rec)
 
                         agg_rec = {
                             "domain": domain,
@@ -370,17 +355,6 @@ def main() -> int:
                         result = await crawler.arun(url=canonical_url, config=run)
                     except Exception:
                         reason = "TIMEOUT"
-                        raw_rec = {
-                            "domain": domain,
-                            "record_id": record_id,
-                            "canonical_url": canonical_url,
-                            "crawler_status": "FAIL",
-                            "crawler_reason": reason,
-                            "crawl_pages_visited": 0,
-                            "crawl_ts": datetime.now(timezone.utc).isoformat(),
-                            "pages": [],
-                        }
-                        write_record(raw_fh, raw_rec)
 
                         agg_rec = {
                             "domain": domain,
@@ -405,14 +379,14 @@ def main() -> int:
                     cleaned_html = getattr(result, "cleaned_html", "") or ""
                     scoped_md = ""
                     try:
-                        from .extraction import scoped_markdown_from_html  # local import to avoid circulars
+                        from extraction import scoped_markdown_from_html  # local import to avoid circulars
                         scoped_md = scoped_markdown_from_html(cleaned_html, content_selectors, base_url=canonical_url)
                     except Exception:
                         scoped_md = ""
                     homepage = make_page_record(
                         canonical_url,
                         result,
-                        keywords=cfg.get("keywords", []),
+                        html_keywords=cfg.get("html_keywords", []),
                         scoped_markdown=scoped_md,
                         emit_links=emit_links_flag,
                     )
@@ -518,7 +492,7 @@ def main() -> int:
                             page_rec = make_page_record(
                                 link,
                                 r2,
-                                keywords=cfg.get("keywords", []),
+                                html_keywords=cfg.get("html_keywords", []),
                                 scoped_markdown=scoped_md2,
                                 emit_links=emit_links_flag,
                             )
@@ -543,7 +517,7 @@ def main() -> int:
                             continue
 
                     # Blog/news rule: at most one if strong signals (contextual ≥ threshold and/or whitelisted slug)
-                    if cfg.get("allow_blog_if_keywords", True):
+                    if cfg.get("allow_blog_if_signals", True):
                         kept: List[Dict[str, Any]] = []
                         blog_kept = False
                         for p in pages:
@@ -556,7 +530,7 @@ def main() -> int:
                             info = selection_info_map.get(p.get("url", ""), {})
                             contextual_ok = isinstance(info.get("contextual_score"), (int, float)) and float(info.get("contextual_score")) >= float(cfg.get("selection_score_threshold", 0.3))
                             has_slug = bool(info.get("matched_slugs"))
-                            if not blog_kept and (contextual_ok or has_slug or p.get("detected_keywords")):
+                            if not blog_kept and (contextual_ok or has_slug):
                                 kept.append(p)
                                 blog_kept = True
                         pages = kept
@@ -579,17 +553,6 @@ def main() -> int:
                     has_any_content = any(((p.get("markdown_scoped") or p.get("markdown_raw") or p.get("markdown_fit"))) for p in pages)
                     if not has_any_content:
                         reason = "EMPTY_CONTENT"
-                        raw_rec = {
-                            "domain": domain,
-                            "record_id": record_id,
-                            "canonical_url": canonical_url,
-                            "crawler_status": "FAIL",
-                            "crawler_reason": reason,
-                            "crawl_pages_visited": len(pages),
-                            "crawl_ts": datetime.now(timezone.utc).isoformat(),
-                            "pages": pages,
-                        }
-                        write_record(raw_fh, raw_rec)
 
                         agg_rec = {
                             "domain": domain,
@@ -623,19 +586,6 @@ def main() -> int:
                             max_chars_cfg = int(cfg.get("max_chars"))
                         except Exception:
                             max_chars_cfg = None
-
-                    # Write raw detailed record
-                    raw_rec = {
-                        "domain": domain,
-                        "record_id": record_id,
-                        "canonical_url": canonical_url,
-                        "crawler_status": "OK" if getattr(result, "success", True) else "FAIL",
-                        "crawler_reason": "" if getattr(result, "success", True) else (getattr(result, "error_message", None) or "UNKNOWN"),
-                        "crawl_pages_visited": len(pages),
-                        "crawl_ts": datetime.now(timezone.utc).isoformat(),
-                        "pages": pages,
-                    }
-                    write_record(raw_fh, raw_rec)
 
                     # Write aggregated record
                     agg_rec = _build_aggregated_record(domain, pages, max_tokens=max_tokens_cfg, max_chars=max_chars_cfg)

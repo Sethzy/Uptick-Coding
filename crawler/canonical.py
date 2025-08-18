@@ -12,7 +12,7 @@ from __future__ import annotations
 import httpx
 from typing import List, Optional, Dict
 import asyncio
-from .session import build_headers
+from session import build_headers
 
 FALLBACKS = (
     "https://{root}",

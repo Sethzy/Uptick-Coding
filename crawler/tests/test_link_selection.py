@@ -56,9 +56,9 @@ def test_scoring_selection_deterministic_tie_breakers():
 
 def test_blog_news_rule():
     pages = [
-        {"url": "https://acme.com/services/inspections", "detected_keywords": ["inspection"]},
-        {"url": "https://acme.com/blog/new-inspection-standard", "detected_keywords": []},
-        {"url": "https://acme.com/news/award", "detected_keywords": []},
+        {"url": "https://acme.com/services/inspections"},
+        {"url": "https://acme.com/blog/new-inspection-standard"},
+        {"url": "https://acme.com/news/award"},
     ]
     # Map slugs to only allow one blog/news
     info = {

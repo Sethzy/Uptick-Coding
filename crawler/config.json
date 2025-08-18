@@ -1,13 +1,16 @@
 {
-  "keywords": [
+  "html_keywords": [
+    "building report",
+    "BuildingReports.com",
+    "inspect point",
+    "buildops",
+    "buildops.com",
+    "inspectpoint.com",
+    "inspectpoint",
+    "Service Trade",
+    "servicetrade.com",
     "NFPA",
-    "plumbing",
-    "hvac",
-    "mechanical",
-    "water",
-    "energy",
-    "electrical",
-    "security"
+    "Pye-Barker"
   ],
   "disallowed_paths": [
     "/privacy",
@@ -24,7 +27,7 @@
   "page_timeout_ms": 60000,
   "canonicalization_timeout_sec": 12.0,
   "canonicalization_retries": 2,
-  "allow_blog_if_keywords": true,
+  "allow_blog_if_signals": true,
   "exclude_external_links": true,
   "excluded_tags": ["nav", "footer", "script", "style"],
   "respect_robots": false,

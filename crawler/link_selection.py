@@ -447,8 +447,8 @@ def select_links_with_scoring(
 
 def apply_blog_news_rule(pages: Sequence[Dict[str, Any]], selection_info_map: Dict[str, Dict[str, Any]], *, contextual_threshold: float = 0.0) -> List[Dict[str, Any]]:
     """
-    Keep at most one blog/news page, requiring either matched whitelist slugs or
-    detected keywords; ignore contextual scoring.
+    Keep at most one blog/news page, requiring matched whitelist slugs;
+    ignore contextual scoring.
 
     Args:
         pages: Page records as produced by make_page_record.
@@ -468,10 +468,9 @@ def apply_blog_news_rule(pages: Sequence[Dict[str, Any]], selection_info_map: Di
             kept.append(p)
             continue
         info = selection_info_map.get(url, {})
-        # AIDEV-NOTE: Ignore contextual; rely on whitelist slugs or detected keywords only
+        # AIDEV-NOTE: Ignore contextual; rely on whitelist slugs only
         has_slug = bool(info.get("matched_slugs"))
-        has_detected = bool(p.get("detected_keywords"))
-        if not blog_kept and (has_slug or has_detected):
+        if not blog_kept and has_slug:
             kept.append(p)
             blog_kept = True
     return kept

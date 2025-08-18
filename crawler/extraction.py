@@ -1,9 +1,9 @@
 """
 Purpose: Page extraction helpers using Crawl4AI outputs.
-Description: Normalizes Crawl4AI results into page records with headings,
-             keyword detection, and evidence snippets. Also supports
-             DOM-scoped extraction using CSS selectors for unique page content.
-Key Functions: extract_headings_simple, detect_keywords, build_evidence_snippets,
+Description: Normalizes Crawl4AI results into page records with headings
+             and HTML keyword detection. Also supports DOM-scoped extraction 
+             using CSS selectors for unique page content.
+Key Functions: extract_headings_simple, detect_html_keywords,
                scoped_markdown_from_html, make_page_record
 
 AIDEV-NOTE: Keep logic deterministic and lightweight for MLS.
@@ -35,31 +35,33 @@ def extract_headings_simple(markdown: str) -> List[str]:
     return headings[:12]
 
 
-def detect_keywords(text: str, keywords: Sequence[str]) -> List[str]:
+def detect_html_keywords(html: str, keywords: Sequence[str]) -> List[str]:
+    """
+    Search for keywords directly in HTML content for accurate pattern detection.
+    
+    This function searches the raw HTML source instead of processed markdown
+    to ensure comprehensive keyword detection as specified in the PRD.
+    
+    Args:
+        html: Raw HTML content to search
+        keywords: List of keywords to search for
+        
+    Returns:
+        List of keywords found in the HTML content
+    """
     found: List[str] = []
-    low = text.lower()
-    for kw in keywords:
-        if kw.lower() in low:
-            found.append(kw)
+    if not html or not keywords:
+        return found
+    
+    # Convert HTML to lowercase for case-insensitive search
+    html_lower = html.lower()
+    
+    for keyword in keywords:
+        keyword_lower = keyword.lower()
+        if keyword_lower in html_lower:
+            found.append(keyword)
+    
     return found
-
-
-def build_evidence_snippets(text: str, keywords: Sequence[str], *, window: int = 240, max_snippets: int = 2) -> List[str]:
-    low = text.lower()
-    out: List[str] = []
-    for kw in keywords:
-        k = kw.lower()
-        idx = low.find(k)
-        if idx == -1:
-            continue
-        start = max(0, idx - window // 2)
-        end = min(len(text), start + window)
-        snippet = text[start:end].strip()
-        if snippet and snippet not in out:
-            out.append(snippet)
-        if len(out) >= max_snippets:
-            break
-    return out
 
 
 def clean_text(text: str) -> str:
@@ -271,7 +273,7 @@ def make_page_record(
     url: str,
     result: Any,
     *,
-    keywords: Sequence[str],
+    html_keywords: Optional[Sequence[str]] = None,
     scoped_markdown: Optional[str] = None,
     emit_links: bool = False,
 ) -> Dict:
@@ -295,6 +297,9 @@ def make_page_record(
     # AIDEV-NOTE: Trimmed schema per decision — no cleaned_html or markdown_raw
     links = _get(result, "links", {}) or {}
     metadata = _get(result, "metadata", {}) or {}
+    
+    # Get HTML content for keyword detection
+    html_content = _get(result, "html", "") or _get(result, "cleaned_html", "") or ""
 
     markdown_scoped = scoped_markdown or ""
     if markdown_scoped:
@@ -304,8 +309,11 @@ def make_page_record(
     # Derive signals from scoped content only
     signal_text = markdown_scoped
     headings = extract_headings_simple(signal_text)
-    detected = detect_keywords(signal_text, keywords)
-    evidence = build_evidence_snippets(signal_text, detected)
+    
+    # HTML keyword detection as specified in PRD
+    html_detected_keywords = []
+    if html_keywords and html_content:
+        html_detected_keywords = detect_html_keywords(html_content, html_keywords)
 
     # AIDEV-NOTE: Redact heavy `links` object from page records. If emit_links is
     # true, surface only minimal counts for internal/external links for debugging.
@@ -334,8 +342,8 @@ def make_page_record(
         "title": metadata.get("title"),
         "text_length": len(signal_text),
         "headings": headings,
-        "detected_keywords": detected,
-        "evidence_snippets": evidence,
+        # HTML keyword detection as per PRD specification
+        "html_keywords_found": html_detected_keywords,
         # New fields for side-by-side review
         "markdown_scoped": markdown_scoped,
         "markdown_raw": markdown_raw,

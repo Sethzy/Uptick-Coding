@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Sequence
 import json
 import os
 
-from .reachability import load_domains_from_csv
+from reachability import load_domains_from_csv
 
 
 def _safe_title(s: Any) -> str:
@@ -98,10 +98,10 @@ def _per_domain_details(records_by_domain: Dict[str, Dict], ordered_domains: Seq
 def generate_markdown_report(output_jsonl_path: str, input_csv_path: str) -> str:
     """
     Render a Markdown report from the JSONL domain records and write it next to
-    the JSONL file as `raw-output.md`. Returns the path to the written Markdown.
+    the JSONL file as `crawl-summary.md`. Returns the path to the written Markdown.
     """
     run_dir = os.path.dirname(os.path.abspath(output_jsonl_path))
-    md_path = os.path.join(run_dir, "raw-output.md")
+    md_path = os.path.join(run_dir, "crawl-summary.md")
 
     # Load all records keyed by domain
     records_by_domain: Dict[str, Dict] = {}
@@ -137,8 +137,8 @@ def generate_markdown_report(output_jsonl_path: str, input_csv_path: str) -> str
     lines: List[str] = []
     lines.append("<!--")
     lines.append("/**")
-    lines.append(" * Purpose: Human-readable summary of aggregated output.jsonl")
-    lines.append(" * Description: Summarizes aggregated context shape for quick verification.")
+    lines.append(" * Purpose: Human-readable summary of crawl results from output.jsonl")
+    lines.append(" * Description: Summarizes crawled domains and aggregated context for quick verification.")
     lines.append(" * Key Sections: Overview table; Per-domain details")
     lines.append(" */")
     lines.append("-->")
