@@ -15,3 +15,4 @@ __all__ = [
 ]
 
 
+https://github.com/mendableai/firecrawl-mcp-server
