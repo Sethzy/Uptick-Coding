@@ -1,8 +1,8 @@
 """
 Purpose: Python API for the lightweight LLM scoring pipeline.
-Description: Implements `score_domain` and `score_file` to call an LLM on a
-pre-built aggregated context per domain and emit JSONL/CSV outputs.
-Key Functions/Classes: `score_domain`, `score_file`.
+Description: Implements `score_domain` and `score_labeled_file` to call an LLM on a
+pre-built aggregated context per domain and emit JSONL outputs with classification results.
+Key Functions/Classes: `score_domain`, `score_labeled_domain`, `score_labeled_file`.
 """
 
 from __future__ import annotations
@@ -15,10 +15,9 @@ from typing import Iterable, List, Optional
 
 import httpx
 
-from .models import ClassificationResult, LlmInput, LabeledDatasetRecord, LabeledDatasetResult
-from .config import get_openrouter_api_key, get_openrouter_endpoint
-from .io_jsonl import iter_llm_inputs_from_jsonl, write_results_jsonl, iter_labeled_dataset_from_jsonl, write_labeled_results_jsonl
-from .io_csv import write_results_csv
+from .models import ClassificationResult, LabeledDatasetRecord, LabeledDatasetResult
+from .config import get_openrouter_api_key, get_openrouter_endpoint, get_default_model
+from .io_jsonl import iter_labeled_dataset_from_jsonl, write_labeled_results_jsonl
 from .logging import log_info, log_error
 
 
@@ -27,12 +26,16 @@ from .logging import log_info, log_error
 
 @dataclass
 class LlmConfig:
-    model: str = "qwen/qwen3-30b-a3b"
+    model: str = None  # Will be set from environment if None
     temperature: float = 0.0
     top_p: float = 1.0
     max_tokens: int = 512
     timeout_seconds: int = 90
     # AIDEV-NOTE: Keep config minimal; prompt is fixed.
+    
+    def __post_init__(self):
+        if self.model is None:
+            self.model = get_default_model()
 
 
 OPENROUTER_API_BASE = get_openrouter_endpoint()
@@ -102,20 +105,31 @@ def _build_prompt(aggregated_context: str) -> dict:
         "   Indicators: Comprehensive website with multiple sections, detailed content, strong online presence\n"
         "\n"
         "2. mostly_does_maintenance_and_service:\n"
-        "   Question: Does the company primarily focus on maintenance and service rather than new installations or other services?\n"
-        "   Look for: Inspection schedules, maintenance contracts, testing services, recurring service offerings\n"
+        "   Question: Does the company primarily focus on ongoing upkeep and repair of existing fire protection systems rather than design and installation of new fire protection systems or other services?\n"
+        "   Look for: service calls, inspections, testing, preventative maintenance, and recurring fire protection offerings\n"
         "   Target: This helps with scoring 50/50 split companies.\n"
         "   Output: Assess either yes or no.\n"
         "\n"
-        "3. participates_in_industry_associations:\n"
-        "   Question: Does the company mention membership in fire protection industry associations?\n"
-        "   Look for: NFSA, AFSA, local fire protection chapters, industry certifications\n"
+        "3. has_certifications_and_compliance_standards:\n"
+        "   Question: Does the company mention any professional certifications, licenses, or compliance with specific regulatory standards?\n"
+        "   Look for: State licenses, manufacturer certifications, technician credentials, NFPA standards (25, 72, 13), UL standards, specific code references, compliance certifications\n"
         "   Output: Provide a short answer detailing what was found. If nothing was found, output N/A.\n"
         "\n"
         "4. has_multiple_service_territories:\n"
-        "   Question: Does the company serve multiple states or regions?\n"
-        "   Look for: Multi-state coverage, regional offices, service territory maps\n"
-        "   Output: Provide a short answer detailing how many. If nothing was found, output N/A.\n"
+        "   Question: Does the company operate in more than one distinct city/area, or does it have multiple branches or offices?\n"
+        "   Output: If they operate in 2 or more distinct cities/areas OR have multiple branches/offices, list all locations. If they only operate in a single city/area with no mention of multiple branches, output N/A.\n"
+        "   Examples:\n"
+        "   - Multiple cities: 'Alhambra, CA; Artesia, CA; Burbank, CA' → List all\n"
+        "   - Single city: 'Los Angeles, CA' → N/A\n"
+        "   - Multiple branches in same city: 'Downtown LA office, West LA office' → List all\n"
+        "   - Broad regions: 'Southern California' or 'Texas' → N/A (too vague)\n"
+        "   - Multiple specific cities: 'Los Angeles, CA; San Diego, CA; Phoenix, AZ' → List all\n"
+        "\n"
+        "5. has_parent_company:\n"
+        "   Question: Do they have a parent company?\n"
+        "   Look for: any variations of. it does not need to be case sensitive or exact phrasing. use common sense.\n"
+        "   Examples: Pye Barker, API Group, Summit Companies, Sciens Building Solutions, Cintas, Guardian Fire Protection, Hiller Fire, Impact Fire, Fortis Fire & Safety, Zeus Fire & Security\n"
+        "   Output: Provide a short answer detailing what was found. If nothing was found, output N/A.\n"
         "\n"
         "Schema:\n"
         "{\n"
@@ -123,8 +137,9 @@ def _build_prompt(aggregated_context: str) -> dict:
         "  \"classification_category_rationale\": \"Brief explanation of why this classification was chosen based on the website content\",\n"
         "  \"website_quality\": \"Poor|Average|High Quality\",\n"
         "  \"mostly_does_maintenance_and_service\": \"yes|no\",\n"
-        "  \"participates_in_industry_associations\": \"short answer or N/A\",\n"
-        "  \"has_multiple_service_territories\": \"short answer or N/A\"\n"
+        "  \"has_certifications_and_compliance_standards\": \"short answer or N/A\",\n"
+        "  \"has_multiple_service_territories\": \"short answer or N/A\",\n"
+        "  \"has_parent_company\": \"short answer or N/A\"\n"
         "}\n"
         "Rules:\n"
         "- Temperature: 0. Output JSON only.\n"
@@ -141,7 +156,6 @@ def _build_prompt(aggregated_context: str) -> dict:
         "role": "user",
         "content": f"System: {system}\n\nUser:\n{user}",
     }
-
 
 def _parse_llm_json(raw_text: str) -> dict:
     # AIDEV-NOTE: Strict JSON parse; one simple repair attempt if wrapped in code fences.
@@ -193,7 +207,7 @@ def score_domain(
     domain: str,
     aggregated_context: str,
     record_id: Optional[str] = None,
-    model: str = "qwen/qwen3-30b-a3b",
+    model: str = None,
     timeout_seconds: int = 90,
 ) -> ClassificationResult:
     cfg = LlmConfig(model=model, timeout_seconds=timeout_seconds)
@@ -214,11 +228,12 @@ def score_domain(
                 return ClassificationResult(
                     domain=domain,
                     classification_category=obj.get("classification_category", "Other"),
-                    rationale=obj.get("rationale", "No rationale provided"),
+                    rationale=obj.get("classification_category_rationale", "No rationale provided"),
                     website_quality=obj.get("website_quality", "Not Assessed"),
                     mostly_does_maintenance_and_service=obj.get("mostly_does_maintenance_and_service", "Not Assessed"),
-                    participates_in_industry_associations=obj.get("participates_in_industry_associations", "Not Assessed"),
+                    has_certifications_and_compliance_standards=obj.get("has_certifications_and_compliance_standards", "Not Assessed"),
                     has_multiple_service_territories=obj.get("has_multiple_service_territories", "Not Assessed"),
+                    has_parent_company=obj.get("has_parent_company", "Not Assessed"),
                     record_id=record_id,
                 )
             except httpx.HTTPStatusError as e:
@@ -236,57 +251,10 @@ def score_domain(
         raise last_exc
 
 
-def _iter_llm_inputs_from_jsonl(path: str) -> Iterable[LlmInput]:
-    # Backward shim to keep api small; delegate to io_jsonl
-    return iter_llm_inputs_from_jsonl(path)
-
-
-def score_file(
-    *,
-    input_jsonl: str,
-    output_jsonl: Optional[str] = None,
-    output_csv: Optional[str] = None,
-    model: str = "qwen/qwen3-30b-a3b",
-    timeout_seconds: int = 90,
-) -> List[ClassificationResult]:
-    inputs = list(_iter_llm_inputs_from_jsonl(input_jsonl))
-    
-    log_info(f"Starting classification of {len(inputs)} domains using model: {model}")
-    log_info(f"Outputs: JSONL={output_jsonl or 'none'}, CSV={output_csv or 'none'}")
-
-    results: List[ClassificationResult] = []
-    for i, item in enumerate(inputs, 1):
-        log_info(f"\n[{i}/{len(inputs)}] Processing domain: {item.domain}")
-        try:
-            result = score_domain(
-                domain=item.domain,
-                aggregated_context=item.aggregated_context,
-                record_id=getattr(item, 'record_id', None),
-                model=model,
-                timeout_seconds=timeout_seconds,
-            )
-            results.append(result)
-        except Exception as e:
-            log_error(f"Failed to process {item.domain}: {e}")
-            # Continue with next domain instead of failing completely
-            continue
-
-    log_info(f"\n✅ Completed {len(results)}/{len(inputs)} domains successfully")
-    
-    if output_jsonl:
-        log_info(f"Writing JSONL to: {output_jsonl}")
-        write_results_jsonl(output_jsonl, results)
-    if output_csv:
-        log_info(f"Writing CSV to: {output_csv}")
-        write_results_csv(output_csv, results)
-
-    return results
-
-
 def score_labeled_domain(
     *,
     record: LabeledDatasetRecord,
-    model: str = "qwen/qwen3-30b-a3b",
+    model: str = None,
     timeout_seconds: int = 90,
 ) -> LabeledDatasetResult:
     """Score a single labeled dataset record using only the aggregated_context field."""
@@ -314,6 +282,11 @@ def score_labeled_domain(
         core_service=record.core_service,
         classification_category=classification_result.classification_category,
         rationale=classification_result.rationale,
+        website_quality=classification_result.website_quality,
+        mostly_does_maintenance_and_service=classification_result.mostly_does_maintenance_and_service,
+        has_certifications_and_compliance_standards=classification_result.has_certifications_and_compliance_standards,
+        has_multiple_service_territories=classification_result.has_multiple_service_territories,
+        has_parent_company=classification_result.has_parent_company,
     )
 
 
@@ -321,7 +294,7 @@ def score_labeled_file(
     *,
     input_jsonl: str,
     output_jsonl: Optional[str] = None,
-    model: str = "qwen/qwen3-30b-a3b",
+    model: str = None,
     timeout_seconds: int = 90,
 ) -> List[LabeledDatasetResult]:
     """Score a labeled dataset file, preserving all original fields and adding classification results."""

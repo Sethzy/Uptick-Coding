@@ -1,7 +1,7 @@
 """
 Purpose: JSONL read/write helpers for the scoring pipeline.
-Description: Small utilities to load LLM inputs and persist results.
-Key Functions/Classes: `iter_llm_inputs_from_jsonl`, `write_results_jsonl`, `iter_labeled_dataset_from_jsonl`, `write_labeled_results_jsonl`.
+Description: Small utilities to load labeled dataset records and persist classification results.
+Key Functions/Classes: `iter_labeled_dataset_from_jsonl`, `write_labeled_results_jsonl`.
 """
 
 from __future__ import annotations
@@ -9,24 +9,7 @@ from __future__ import annotations
 import json
 from typing import Iterable
 
-from .models import ClassificationResult, LlmInput, LabeledDatasetRecord, LabeledDatasetResult
-
-
-def iter_llm_inputs_from_jsonl(path: str) -> Iterable[LlmInput]:
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            yield LlmInput.model_validate(obj)
-
-
-def write_results_jsonl(path: str, results: Iterable[ClassificationResult]) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        for r in results:
-            f.write(r.model_dump_json())
-            f.write("\n")
+from .models import LabeledDatasetRecord, LabeledDatasetResult
 
 
 def iter_labeled_dataset_from_jsonl(path: str) -> Iterable[LabeledDatasetRecord]:

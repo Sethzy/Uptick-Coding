@@ -79,7 +79,7 @@ def main() -> int:
     parser.add_argument("--checkpoint", default=os.getenv("CHECKPOINT", os.path.join(os.getcwd(), ".crawl-checkpoint.json")))
     parser.add_argument("--from-index", type=int, default=int(os.getenv("FROM_INDEX", "0")))
     parser.add_argument("--limit", type=int, default=int(os.getenv("LIMIT", "0")))
-    parser.add_argument("--concurrency", type=int, default=int(os.getenv("CONCURRENCY", "1")))
+    parser.add_argument("--concurrency", type=int, default=int(os.getenv("CONCURRENCY", "2")))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--column", default=os.getenv("DOMAIN_COLUMN", "tam_site"), help="CSV column to read domains from (default: tam_site)")

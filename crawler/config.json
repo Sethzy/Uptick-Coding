@@ -1,16 +1,32 @@
 {
   "html_keywords": [
+
     "building report",
     "BuildingReports.com",
     "inspect point",
-    "buildops",
-    "buildops.com",
     "inspectpoint.com",
     "inspectpoint",
+    "buildops",
+    "buildops.com",
     "Service Trade",
     "servicetrade.com",
+    
+
     "NFPA",
-    "Pye-Barker"
+    "National Fire Protection Association",
+    "NAFED",
+    "National Association of Fire Equipment Distributors",
+    "AFSA",
+    "American Fire Sprinkler Association",
+    "NFSA",
+    "National Fire Sprinkler Association",
+
+
+    "CFSA",
+    "CASA",
+    "Canadian Automatic Sprinkler Association",
+    "Canadian Fire Safety Association"
+
   ],
   "disallowed_paths": [
     "/privacy",

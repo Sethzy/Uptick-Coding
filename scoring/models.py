@@ -1,7 +1,7 @@
 """
 Purpose: Shared Pydantic models for the scoring package.
 Description: Centralizes the core data models that are used across API and CLI.
-Key Functions/Classes: `Evidence`, `ClassificationResult`, `LlmInput`, `LabeledDatasetRecord`, `LabeledDatasetResult`.
+Key Functions/Classes: `Evidence`, `ClassificationResult`, `LabeledDatasetRecord`, `LabeledDatasetResult`.
 """
 
 from __future__ import annotations
@@ -22,14 +22,10 @@ class ClassificationResult(BaseModel):
     rationale: str
     website_quality: str
     mostly_does_maintenance_and_service: str
-    participates_in_industry_associations: str
+    has_certifications_and_compliance_standards: str
     has_multiple_service_territories: str
+    has_parent_company: str
     record_id: Optional[str] = None
-
-
-class LlmInput(BaseModel):
-    domain: str
-    aggregated_context: str
 
 
 class LabeledDatasetRecord(BaseModel):
@@ -72,8 +68,9 @@ class LabeledDatasetResult(BaseModel):
     rationale: str
     website_quality: str
     mostly_does_maintenance_and_service: str
-    participates_in_industry_associations: str
+    has_certifications_and_compliance_standards: str
     has_multiple_service_territories: str
+    has_parent_company: str
     
     class Config:
         populate_by_name = True

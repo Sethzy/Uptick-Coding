@@ -31,7 +31,7 @@ The scoring module consists of the following core components:
 
 ### Core Files
 
-- **`__init__.py`** - Public API surface exposing `score_domain` and `score_file`
+- **`__init__.py`** - Public API surface exposing `score_domain` and `score_labeled_file`
 - **`api.py`** - Main scoring logic and LLM integration
 - **`models.py`** - Pydantic data models for structured data handling
 - **`cli.py`** - Command-line interface for batch processing
@@ -48,10 +48,10 @@ scoring/
 ├── __init__.py (Public API)
 ├── api.py (Core Logic)
 │   ├── score_domain() - Single domain scoring
-│   └── score_file() - Batch file processing
+│   └── score_labeled_file() - Batch labeled dataset processing
 ├── models.py (Data Models)
 │   ├── ClassificationResult
-│   ├── LlmInput
+│   ├── LabeledDatasetRecord
 │   └── Evidence
 ├── cli.py (CLI Interface)
 ├── config.py (Configuration)
@@ -80,7 +80,7 @@ scoring/
 - Structured JSON output parsing
 - Comprehensive error handling and logging
 
-### 2. Batch File Processing (`score_file`)
+### 2. Batch Labeled Dataset Processing (`score_labeled_file`)
 
 **Purpose:** Process multiple domains from JSONL input files
 **Files Involved:** `api.py`, `io_jsonl.py`, `io_csv.py`, `cli.py`
@@ -183,7 +183,7 @@ dependencies = [
 
 ### API Contracts
 
-- **Input Schema:** `LlmInput` with domain and aggregated_context
+- **Input Schema:** `LabeledDatasetRecord` with domain, aggregated_context, and business intelligence fields
 - **Output Schema:** `ClassificationResult` with classification and rationale
 - **File Formats:** JSONL for input, JSONL/CSV for output
 
@@ -233,7 +233,7 @@ dependencies = [
 ### Python API Usage
 
 ```python
-from scoring import score_domain, score_file
+from scoring import score_domain, score_labeled_file
 
 # Score a single domain
 result = score_domain(
@@ -243,7 +243,7 @@ result = score_domain(
 )
 
 # Process a file of domains
-results = score_file(
+results = score_labeled_file(
     input_jsonl="domains.jsonl",
     output_jsonl="results.jsonl",
     output_csv="results.csv"
@@ -350,5 +350,3 @@ The system automatically:
 - Continues processing on individual domain failures
 - Logs detailed error information for debugging
 - Provides graceful degradation for partial failures
-
-

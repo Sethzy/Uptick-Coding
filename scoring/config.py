@@ -1,7 +1,7 @@
 """
 Purpose: Centralized configuration helpers for the scoring package.
 Description: Loads environment variables and provides small helpers for defaults.
-Key Functions/Classes: `get_openrouter_api_key`, `get_openrouter_endpoint`.
+Key Functions/Classes: `get_openrouter_api_key`, `get_openrouter_endpoint`, `get_default_model`.
 """
 
 from __future__ import annotations
@@ -23,5 +23,10 @@ def get_openrouter_api_key() -> Optional[str]:
 
 def get_openrouter_endpoint() -> str:
     return os.getenv("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1")
+
+
+def get_default_model() -> str:
+    """Get the default LLM model from environment variables."""
+    return os.getenv("DEFAULT_LLM_MODEL", "qwen/qwen3-30b-a3b")
 
 

@@ -17,14 +17,8 @@
 **Look for**: Multi-state coverage, regional offices, service territory maps
 **Output**: Provide a short answer detailing how many. If nothing was found, output N/A.
 
-## **`has_any_form_of_certification`**
+## **`has_certifications_and_compliance_standards`**
 
-**Question**: Does the company mention any professional certifications or licenses?
-**Look for**: State licenses, manufacturer certifications, technician credentials
-**Output**: Provide a short answer detailing what was found. If nothing was found, output N/A.
-
-## **`mentions_compliance_to_specific_regulatory_standards`**
-
-**Question**: Does the company reference specific NFPA standards or other standards?
-**Look for**: NFPA 25, 72, 13, UL standards, specific code references etc.
+**Question**: Does the company mention any professional certifications, licenses, or compliance with specific regulatory standards?
+**Look for**: State licenses, manufacturer certifications, technician credentials, NFPA standards (25, 72, 13), UL standards, specific code references, compliance certifications
 **Output**: Provide a short answer detailing what was found. If nothing was found, output N/A.

@@ -298,18 +298,13 @@ scorer classify \
 ### 11.2 Python API
 
 ```python
-from scoring import score_domain, score_file
+from scoring import score_domain, score_labeled_file
 
 result = score_domain(domain="acme.com", crawl_path="./crawl/acme.json")
-score_file(
-    input_csv="domains.csv",
-    crawl_dir="./crawl/",
-    output_csv="out.csv",
+score_labeled_file(
+    input_jsonl="domains.jsonl",
     output_jsonl="out.jsonl",
-    model="qwen3-30b-a3b",
-    thresholds={"A": 75, "B": 50},
-    max_evidence=3,
-    prompt_version="v1",
+    model="qwen3-30b-a3b"
 )
 ```
 

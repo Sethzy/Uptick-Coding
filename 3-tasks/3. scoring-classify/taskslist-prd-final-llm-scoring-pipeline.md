@@ -18,7 +18,7 @@
 - `scoring/io_csv.py` - CSV writer (flat columns for category, confidence, evidence, metadata).
 - `scoring/run.py` - Orchestration: read input JSONL, classify domains, handle retries/backoff, and logging.
 - `scoring/logging.py` - Structured logging utilities (run_id, model, prompt_version, token counts, request_ms).
-- `scoring/api.py` - Python API surface: `score_domain()`, `score_file()`.
+- `scoring/api.py` - Python API surface: `score_domain()`, `score_labeled_file()`.
 - `tests/test_models.py` - Unit tests for strict JSON parsing and single repair flow.
 - `tests/test_evidence.py` - Unit tests for evidence URL/snippet validation and trimming.
 - `tests/test_io.py` - Unit tests for JSONL/CSV schemas and writers.
@@ -66,11 +66,11 @@
   - [ ] 4.3 Implement `scoring/io_csv.py` flattening: domain, category, confidence, rationale, evidence_url_1..3, evidence_snippet_1..3, model/prompt/run_id
   - [ ] 4.4 Unit tests in `tests/test_io.py` for schema mapping and quoting/escaping
 
-- [ ] 5.0 CLI (`scorer classify`) and Python API (`score_domain`, `score_file`) interfaces
+- [ ] 5.0 CLI (`scorer classify`) and Python API (`score_domain`, `score_labeled_file`) interfaces
 
   - [ ] 5.1 Implement `scoring/cli.py` with flags: `--input`, `--output-jsonl`, `--output-csv`, `--model`, `--threshold-a`, `--threshold-b`, `--max-evidence`, `--prompt-version`, `--config`
   - [ ] 5.2 Wire CLI to orchestrator in `scoring/run.py`
-  - [ ] 5.3 Implement `scoring/api.py` with `score_domain(...)` and `score_file(...)`
+  - [ ] 5.3 Implement `scoring/api.py` with `score_domain(...)` and `score_labeled_file(...)`
   - [ ] 5.4 Add `tests/test_cli.py` smoke test to run a tiny input and assert output headers
 
 - [ ] 6.0 Error handling and retries with jittered backoff; per-request timeouts
