@@ -21,6 +21,9 @@ class ClassificationResult(BaseModel):
     classification_category: str
     rationale: str
     website_quality: str
+    mostly_does_maintenance_and_service: str
+    participates_in_industry_associations: str
+    has_multiple_service_territories: str
     record_id: Optional[str] = None
 
 
@@ -67,6 +70,10 @@ class LabeledDatasetResult(BaseModel):
     # New classification fields
     classification_category: str
     rationale: str
+    website_quality: str
+    mostly_does_maintenance_and_service: str
+    participates_in_industry_associations: str
+    has_multiple_service_territories: str
     
     class Config:
         populate_by_name = True

@@ -88,21 +88,43 @@ def _build_prompt(aggregated_context: str) -> dict:
         "   - Content that doesn't mention fire protection services, business activities, or company focus\n"
         "   - RULE: Classify here if aggregated_context is empty, very short (<50 chars), or contains no business-relevant information\n"
         "\n"
-        "Website Investment Quality Levels:\n"
-        "Poor:\n"
-        "Pages: 1 page\n"
-        "Indicators: Basic placeholder, minimal content, \"Coming Soon\" sites\n"
-        "Average:\n"
-        "Pages: 1-2 pages\n"
-        "Indicators: Basic company info, some service descriptions, functional but minimal\n"
-        "High Quality:\n"
-        "Pages: 3+ pages\n"
-        "Indicators: Comprehensive website with multiple sections, detailed content, strong online presence\n\n"
+        "Market Fit Assessment:\n"
+        "\n"
+        "1. Website Investment Quality:\n"
+        "   Poor:\n"
+        "   Pages: 1 page\n"
+        "   Indicators: Basic placeholder, minimal content, \"Coming Soon\" sites\n"
+        "   Average:\n"
+        "   Pages: 1-2 pages\n"
+        "   Indicators: Basic company info, some service descriptions, functional but minimal\n"
+        "   High Quality:\n"
+        "   Pages: 3+ pages\n"
+        "   Indicators: Comprehensive website with multiple sections, detailed content, strong online presence\n"
+        "\n"
+        "2. mostly_does_maintenance_and_service:\n"
+        "   Question: Does the company primarily focus on maintenance and service rather than new installations or other services?\n"
+        "   Look for: Inspection schedules, maintenance contracts, testing services, recurring service offerings\n"
+        "   Target: This helps with scoring 50/50 split companies.\n"
+        "   Output: Assess either yes or no.\n"
+        "\n"
+        "3. participates_in_industry_associations:\n"
+        "   Question: Does the company mention membership in fire protection industry associations?\n"
+        "   Look for: NFSA, AFSA, local fire protection chapters, industry certifications\n"
+        "   Output: Provide a short answer detailing what was found. If nothing was found, output N/A.\n"
+        "\n"
+        "4. has_multiple_service_territories:\n"
+        "   Question: Does the company serve multiple states or regions?\n"
+        "   Look for: Multi-state coverage, regional offices, service territory maps\n"
+        "   Output: Provide a short answer detailing how many. If nothing was found, output N/A.\n"
+        "\n"
         "Schema:\n"
         "{\n"
         "  \"classification_category\": \"Maintenance & Service Only|Install Only|50/50 Split|Other|Not Classifiable\",\n"
-        "  \"rationale\": \"Brief explanation of why this classification was chosen based on the website content\",\n"
-        "  \"website_quality\": \"Poor|Average|High Quality\"\n"
+        "  \"classification_category_rationale\": \"Brief explanation of why this classification was chosen based on the website content\",\n"
+        "  \"website_quality\": \"Poor|Average|High Quality\",\n"
+        "  \"mostly_does_maintenance_and_service\": \"yes|no\",\n"
+        "  \"participates_in_industry_associations\": \"short answer or N/A\",\n"
+        "  \"has_multiple_service_territories\": \"short answer or N/A\"\n"
         "}\n"
         "Rules:\n"
         "- Temperature: 0. Output JSON only.\n"
@@ -111,7 +133,8 @@ def _build_prompt(aggregated_context: str) -> dict:
         "- Consider the overall business focus, not just individual mentions.\n"
         "- If aggregated_context is empty or contains no useful business information, classify as 'Not Classifiable'.\n"
         "- Website quality should be determined based on the number of pages and content depth in the aggregated context.\n"
-        "- Website quality assessment is independent of business classification - a \"Poor\" quality site can still be classified into any business category if sufficient information exists.\n\n"
+        "- Website quality assessment is independent of business classification - a \"Poor\" quality site can still be classified into any business category if sufficient information exists.\n"
+        "- Market fit assessments should be based on explicit mentions in the website content.\n\n"
         f"Context (Aggregated):\n{aggregated_context}"
     )
     return {
@@ -192,6 +215,10 @@ def score_domain(
                     domain=domain,
                     classification_category=obj.get("classification_category", "Other"),
                     rationale=obj.get("rationale", "No rationale provided"),
+                    website_quality=obj.get("website_quality", "Not Assessed"),
+                    mostly_does_maintenance_and_service=obj.get("mostly_does_maintenance_and_service", "Not Assessed"),
+                    participates_in_industry_associations=obj.get("participates_in_industry_associations", "Not Assessed"),
+                    has_multiple_service_territories=obj.get("has_multiple_service_territories", "Not Assessed"),
                     record_id=record_id,
                 )
             except httpx.HTTPStatusError as e:
