@@ -36,7 +36,7 @@
     "/sso"
   ],
   
-  "page_cap": 8,
+  "page_cap": 5,
   "per_domain_delay_seconds": { "min": 1.5, "max": 2.0, "jitter": 0.4 },
   "global_concurrency": 2,
   "retries": 2,

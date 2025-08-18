@@ -136,42 +136,126 @@ This document maps all possible outputs from the LLM scoring system to enable nu
 | `"Multiple associations"` | Membership in multiple fire protection groups       | High industry engagement, strong professional network |
 | `"Other association"`     | Different fire protection association mentioned     | Industry membership, but unknown specific benefits    |
 
+## Numerical Scoring System (100 Point Scale)
+
+### Field Weighting & Scoring
+
+| Field                               | Max Points | Weight   | Scoring Logic                        |
+| ----------------------------------- | ---------- | -------- | ------------------------------------ |
+| **1. Classification Category**      | **30**     | 30%      | Business model value                 |
+| **2. Website Quality**              | **20**     | 20%      | Digital investment & professionalism |
+| **3. Maintenance & Service Focus**  | **10**     | 10%      | Revenue stability                    |
+| **4. Certifications & Compliance**  | **10**     | 10%      | Professional credibility             |
+| **5. Service Territory Coverage**   | **10**     | 10%      | Market reach & growth potential      |
+| **6. Parent Company Status**        | **0**      | 0%       | Independent companies preferred      |
+| **7. Competitor Software Usage**    | **10**     | 10%      | Market awareness & tech adoption     |
+| **8. Fire Protection Associations** | **10**     | 10%      | Industry engagement                  |
+| **TOTAL**                           | **100**    | **100%** | **Perfect Company Score**            |
+
 ---
 
-## Scoring Framework Considerations
+### Detailed Scoring Breakdown
 
-### High-Value Indicators
+#### 1. Classification Category (30 points)
 
-- **50/50 Split** business model (diversified revenue)
-- **High Quality** website (professional operations)
-- **Multiple certifications and compliance standards** (professional credibility)
-- **Multi-territory coverage** (growth potential)
-- **Established parent company** (resources/backing)
-- **Multiple competitor software platforms** (market awareness)
-- **Multiple fire protection associations** (industry engagement)
+- `"Maintenance & Service Only"` → **30 points** (Most valuable - stable recurring revenue)
+- `"50/50 Split"` → **15 points** (Diversified revenue streams)
+- `"Install Only"` → **10 points** (Project-based, cyclical business)
+- `"Other"` → **5 points** (Specialized expertise, niche market)
+- `"Not Classifiable"` → **0 points** (Unknown business model, high risk)
 
-### Risk Indicators
+#### 2. Website Quality (20 points)
 
-- **Not Classifiable** (unknown business model)
-- **Poor website quality** (resource constraints)
-- **No certifications or compliance standards** (quality concerns)
-- **Single territory** (limited growth)
-- **Independent company** (potential resource limitations)
-- **No competitor software usage** (market isolation)
-- **No fire protection associations** (industry isolation)
+- `"High Quality"` → **20 points** (Professional operations, strong market presence)
+- `"Average"` → **10 points** (Moderate investment, basic digital maturity)
+- `"Poor"` → **0 points** (Low investment, potential resource constraints)
 
-### Neutral Indicators
+#### 3. Maintenance & Service Focus (10 points)
 
-- **Maintenance Only** vs **Install Only** (business model preference)
-- **Average website quality** (moderate investment)
-- **Basic certifications** (minimum compliance)
-- **Single competitor software** (basic market awareness)
-- **Single fire protection association** (basic industry engagement)
+- `"yes"` → **10 points** (Recurring revenue model, stable cash flow)
+- `"no"` → **0 points** (Project-based, potentially higher volatility)
 
-## Next Steps for Numerical Scoring
+#### 4. Certifications & Compliance Standards (10 points)
 
-1. Assign base scores to each categorical field
-2. Create weighted scoring for text-based fields
-3. Develop composite scoring algorithms
-4. Establish score thresholds for different business tiers
-5. Validate scoring against known business outcomes
+- Anything that is not N/A - 10 points
+- `"N/A"` → **0 points** (No credentials, quality concerns)
+
+#### 5. Service Territory Coverage (10 points)
+
+- Anything that is not N/A - 10 points
+- `"N/A"` → **0 points** (Local market focus, limited growth)
+
+#### 6. Parent Company Status (0 points)
+
+- `"N/A"` → **0 points** (Independent company, full autonomy - preferred)
+- Any parent company → **0 points** (Corporate backing - will be penalized later)
+
+#### 7. Competitor Software Usage (10 points)
+
+Anything that is not N/A - 10 points
+
+- `"N/A"` → **0 points** (No market awareness, potential isolation)
+
+#### 8. Fire Protection Associations (10 points)
+
+Anything that is not N/A - 10 points
+
+- `"N/A"` → **0 points** (No industry engagement, isolation)
+
+---
+
+### Supplementary Penalty System
+
+**Parent Company Status Penalty:**
+
+- **Independent companies** (N/A): **No penalty** - 0 points deducted
+- **Corporate-backed companies** (any parent company): **-20 points deducted** from final score
+
+**How it works:**
+
+1. Calculate main score out of 100 points using the 8 fields above
+2. If company has a parent company, deduct 20 points from final score
+3. Final score can range from **-20 to 100 points**
+
+**Example:**
+
+- Company scores 95/100 on main criteria
+- Has parent company → Final score: 95 - 20 = **75 points**
+- Independent company → Final score: 95 - 0 = **95 points**
+
+---
+
+### Score Tiers (Base Score - Before Parent Company Penalty)
+
+- **90-100 points**: **Elite Tier** - Ideal companies with stable recurring revenue, strong credentials, multi-territory presence, and industry leadership
+- **75-89 points**: **High Tier** - Strong companies with good business models, professional operations, and market presence
+- **60-74 points**: **Mid Tier** - Solid companies with established operations and moderate growth potential
+- **45-59 points**: **Basic Tier** - Functional companies with limited scope or resources
+- **0-44 points**: **Risk Tier** - Companies with unknown business models, limited credentials, or operational constraints
+
+**Note:** After applying parent company penalty (-20 points), final scores can range from -20 to 100 points.
+
+---
+
+### Example Scoring
+
+**Perfect Company (100 points):**
+
+- Maintenance & Service Only (30) + High Quality website (20) + Maintenance focus (10) + Certifications (10) + Multi-territory (10) + Independent (0) + Competitor software (10) + Associations (10) = **100 points**
+
+**Average Company (75 points):**
+
+- 50/50 Split (15) + Average website (10) + Maintenance focus (10) + Certifications (10) + Multi-territory (10) + Independent (0) + Competitor software (10) + Associations (10) = **75 points**
+
+**Risk Company (0 points):**
+
+- Not Classifiable (0) + Poor website (0) + No maintenance focus (0) + No certifications (0) + Single territory (0) + Independent (0) + No software (0) + No associations (0) = **0 points**
+
+---
+
+**With Parent Company Penalty Applied:**
+
+**Perfect Independent Company:** 100 - 0 = **100 points** ✅
+**Perfect Corporate Company:** 100 - 20 = **80 points** ⚠️
+**Average Independent Company:** 75 - 0 = **75 points** ✅
+**Average Corporate Company:** 75 - 20 = **55 points** ⚠️

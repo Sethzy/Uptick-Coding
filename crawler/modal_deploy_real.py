@@ -39,14 +39,14 @@ image = (
     )
     # Mount the CSV file
     .add_local_file(
-        local_path="uptick-csvs/Hubspot TAM LIST.csv",
-        remote_path="/root/hubspot_tam_list.csv"
+        local_path="uptick-csvs/enriched-hubspot-TAM-08-25.csv",
+        remote_path="/root/enriched_hubspot_tam_data.csv"
     )
 )
 
 @app.function(
     image=image,
-    timeout=1800,  # 30 minute timeout
+    timeout=18000,  # 5 hour timeout (for 5000 domains)
     memory=4096,   # 4GB RAM
     cpu=2.0,       # 2 CPU cores
     volumes={"/mnt/crawler_outputs": crawler_volume},  # Mount volume for output storage
@@ -85,7 +85,7 @@ def crawl_domains_real(
     volume_output_file = f"/mnt/crawler_outputs/{session_id}.jsonl"
     
     print(f"🚀 Starting REAL crawl with limit={limit} (Session: {session_id})")
-    print(f"📁 Input CSV: /root/hubspot_tam_list.csv")
+    print(f"📁 Input CSV: /root/enriched_hubspot_tam_data.csv")
     print(f"📤 Temp Output: {temp_output_file}")
     print(f"💾 Volume Output: {volume_output_file}")
     print(f"🏷️  Domain column: {domain_column}")
@@ -98,7 +98,7 @@ def crawl_domains_real(
         # Build the command line arguments for the crawler
         cmd = [
             "python", "run_crawl.py",
-            "--input-csv", "/root/hubspot_tam_list.csv",
+            "--input-csv", "/root/enriched_hubspot_tam_data.csv",
             "--output-jsonl", temp_output_file,
             "--limit", str(limit),
             "--column", domain_column,
@@ -173,7 +173,7 @@ def crawl_domains_real(
                     "file_hash": file_hash,
                     "output_lines": line_count,
                     "domains_processed": limit,
-                    "input_file": "/root/test.csv",
+                    "input_file": "/root/enriched_hubspot_tam_data.csv",
                     "temp_output_file": temp_output_file,
                     "crawler_stdout": result.stdout[:1000] if result.stdout else None,  # Truncate for return
                     "crawler_stderr": result.stderr[:1000] if result.stderr else None   # Truncate for return
@@ -209,7 +209,7 @@ def crawl_domains_real(
             "status": "error",
             "error": str(e),
             "session_id": session_id,
-            "input_file": "/root/hubspot_tam_list.csv"
+            "input_file": "/root/enriched_hubspot_tam_data.csv"
         }
 
 @app.local_entrypoint()

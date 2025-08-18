@@ -74,17 +74,17 @@ def main() -> int:
 
     # CLI flags
     parser = argparse.ArgumentParser(description="Targeted domain crawler (PRD aligned)")
-    parser.add_argument("--input-csv", default=os.getenv("INPUT_CSV", os.path.join(os.getcwd(), "uptick-csvs", "final_merged_hubspot_tam_data_resolved.csv")))
-    parser.add_argument("--output-jsonl", default=os.getenv("OUTPUT_JSONL", os.path.join(os.getcwd(), "llm-input.jsonl")))
-    parser.add_argument("--checkpoint", default=os.getenv("CHECKPOINT", os.path.join(os.getcwd(), ".crawl-checkpoint.json")))
-    parser.add_argument("--from-index", type=int, default=int(os.getenv("FROM_INDEX", "0")))
-    parser.add_argument("--limit", type=int, default=int(os.getenv("LIMIT", "0")))
-    parser.add_argument("--concurrency", type=int, default=int(os.getenv("CONCURRENCY", "2")))
+    parser.add_argument("--input-csv", default=os.path.join(os.getcwd(), "uptick-csvs", "final_merged_hubspot_tam_data_resolved.csv"))
+    parser.add_argument("--output-jsonl", default=os.path.join(os.getcwd(), "llm-input.jsonl"))
+    parser.add_argument("--checkpoint", default=os.path.join(os.getcwd(), ".crawl-checkpoint.json"))
+    parser.add_argument("--from-index", type=int, default=0)
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--column", default=os.getenv("DOMAIN_COLUMN", "tam_site"), help="CSV column to read domains from (default: tam_site)")
-    parser.add_argument("--id-column", default=os.getenv("ID_COLUMN", "Record ID"), help="CSV column name for stable record ID to carry through outputs")
-    parser.add_argument("--robots", choices=["respect", "ignore", "auto"], default=os.getenv("ROBOTS_MODE", "auto"), help="Robots handling: respect, ignore, or auto (use config)")
+    parser.add_argument("--column", default="tam_site", help="CSV column to read domains from (default: tam_site)")
+    parser.add_argument("--id-column", default="Record ID", help="CSV column name for stable record ID to carry through outputs")
+    parser.add_argument("--robots", choices=["respect", "ignore", "auto"], default="auto", help="Robots handling: respect, ignore, or auto (use config)")
     args = parser.parse_args()
 
     # Runtime config
