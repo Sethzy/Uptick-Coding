@@ -85,7 +85,7 @@ def crawl_domains_real(
             "--limit", str(limit),
             "--column", domain_column,
             "--id-column", id_column,
-            "--concurrency", "1",  # Single domain, so low concurrency
+            "--concurrency", "2",  # Use both CPU cores efficiently
             "--robots", "ignore"   # Simpler robots handling
         ]
         
@@ -158,7 +158,7 @@ def main():
     print("Testing real Modal crawler...")
     
     result = crawl_domains_real.remote(
-        limit=1,
+        limit=2,
         domain_column="Company Domain Name",
         id_column="Record ID"
     )
