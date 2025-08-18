@@ -212,77 +212,13 @@ def crawl_domains_real(
             "input_file": "/root/hubspot_tam_list.csv"
         }
 
-def download_crawl_output(session_id: str, local_filename: str = None) -> dict:
-    """
-    Download crawler output from volume to local filesystem.
-    
-    Args:
-        session_id: Session ID of the crawl output to download
-        local_filename: Local filename to save as (optional)
-    
-    Returns:
-        Dictionary with download status and file information
-    """
-    import hashlib
-    from pathlib import Path
-    
-    if local_filename is None:
-        local_filename = f"{session_id}.jsonl"
-    
-    volume_file_path = f"{session_id}.jsonl"
-    local_file_path = Path(local_filename)
-    
-    print(f"🔄 Downloading {volume_file_path} from volume...")
-    
-    try:
-        # Read the file from volume
-        file_content = b"".join(crawler_volume.read_file(volume_file_path))
-        
-        if not file_content:
-            return {
-                "status": "error",
-                "message": f"File {volume_file_path} is empty or not found in volume"
-            }
-        
-        # Calculate hash for integrity check
-        file_hash = hashlib.sha256(file_content).hexdigest()
-        file_size = len(file_content)
-        
-        # Count lines
-        content_str = file_content.decode('utf-8')
-        line_count = len(content_str.strip().split('\n')) if content_str.strip() else 0
-        
-        # Write to local file
-        local_file_path.write_bytes(file_content)
-        
-        print(f"✅ Downloaded {file_size} bytes to {local_file_path}")
-        print(f"📄 Lines: {line_count}")
-        print(f"🔒 Hash: {file_hash[:16]}...")
-        
-        return {
-            "status": "success",
-            "local_file": str(local_file_path),
-            "file_size": file_size,
-            "file_hash": file_hash,
-            "line_count": line_count,
-            "session_id": session_id
-        }
-        
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to download file: {str(e)}",
-            "session_id": session_id
-        }
-
 @app.local_entrypoint()
 def main(
     limit: int = 2,
     domain_column: str = "Company Domain Name",
-    id_column: str = "Record ID",
-    download_output: bool = True
+    id_column: str = "Record ID"
 ):
-    """Local entrypoint for running crawler and downloading output."""
+    """Local entrypoint for running crawler. Files are saved to Modal volume."""
     print(f"🚀 Starting Modal crawler with limit={limit}...")
     
     # Run the crawler on Modal
@@ -299,36 +235,10 @@ def main(
         print(f"✅ Crawl successful (Session: {session_id})")
         print(f"📄 Output lines: {result.get('output_lines', 0)}")
         print(f"💾 File size: {result.get('file_size', 0)} bytes")
+        print(f"🖾 Volume file: {session_id}.jsonl")
+        print(f"💡 To download manually, use Modal CLI: modal volume get uptick-crawler-outputs {session_id}.jsonl")
         
-        # Download the output file locally if requested
-        if download_output and session_id:
-            print("\n🔄 Downloading output file...")
-            download_result = download_crawl_output(
-                session_id=session_id,
-                local_filename="modal_crawl_output.jsonl"
-            )
-            
-            if download_result['status'] == 'success':
-                print(f"✅ Output successfully downloaded to: {download_result['local_file']}")
-                
-                # Verify integrity
-                if download_result['file_hash'] == result.get('file_hash'):
-                    print("✅ File integrity verified - hashes match!")
-                else:
-                    print("⚠️  File integrity warning - hashes don't match")
-                
-                return {
-                    "crawl_result": result,
-                    "download_result": download_result,
-                    "local_file": download_result['local_file']
-                }
-            else:
-                print(f"❌ Download failed: {download_result.get('message')}")
-                return {"crawl_result": result, "download_error": download_result}
-        else:
-            print(f"💾 File saved to volume as: {session_id}.jsonl")
-            print("💡 To download later, run: download_crawl_output.remote(session_id)")
-            return {"crawl_result": result}
+        return {"crawl_result": result}
     
     else:
         print(f"❌ Crawl failed: {result.get('message', 'Unknown error')}")
@@ -342,3 +252,4 @@ if __name__ == "__main__":
     print("🚀 App deployed! You can now run:")
     print("   modal run crawler/modal_deploy_real.py")
     print("   modal run crawler/modal_deploy_real.py --limit 5")
+    print("   modal volume get uptick-crawler-outputs <session_id>.jsonl  # to download output")
