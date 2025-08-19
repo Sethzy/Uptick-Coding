@@ -95,10 +95,14 @@ def _per_domain_details(records_by_domain: Dict[str, Dict], ordered_domains: Seq
     return out
 
 
-def generate_markdown_report(output_jsonl_path: str, input_csv_path: str) -> str:
+def generate_markdown_report(output_jsonl_path: str, input_csv_path: str = None) -> str:
     """
     Render a Markdown report from the JSONL domain records and write it next to
     the JSONL file as `crawl-summary.md`. Returns the path to the written Markdown.
+    
+    Args:
+        output_jsonl_path: Path to the JSONL output file
+        input_csv_path: Optional path to input CSV for domain ordering (if not provided, uses JSONL order)
     """
     run_dir = os.path.dirname(os.path.abspath(output_jsonl_path))
     md_path = os.path.join(run_dir, "crawl-summary.md")
@@ -122,16 +126,20 @@ def generate_markdown_report(output_jsonl_path: str, input_csv_path: str) -> str
         # Nothing to do
         return md_path
 
-    # Preserve input order; append any extra domains not present in input at the end
+    # Determine domain order - prefer CSV order if available, otherwise use JSONL order
     ordered_domains: List[str] = []
-    try:
-        ordered_domains = load_domains_from_csv(input_csv_path)
-    except Exception:
-        # Fallback to encountered order
-        ordered_domains = list(records_by_domain.keys())
+    if input_csv_path:
+        try:
+            ordered_domains = load_domains_from_csv(input_csv_path)
+            # Append any extra domains not present in input at the end
+            extras = [d for d in records_by_domain.keys() if d not in ordered_domains]
+            ordered_domains = ordered_domains + extras
+        except Exception:
+            # Fallback to encountered order
+            ordered_domains = list(records_by_domain.keys())
     else:
-        extras = [d for d in records_by_domain.keys() if d not in ordered_domains]
-        ordered_domains = ordered_domains + extras
+        # No CSV provided, use the order as encountered in JSONL
+        ordered_domains = list(records_by_domain.keys())
 
     # Build Markdown
     lines: List[str] = []

@@ -12,5 +12,6 @@ dependencies = [
 
 [project.scripts]
 scorer = "scoring.cli:scorer"
+quick-score = "scoring.quick_start:quick_start"
 
 

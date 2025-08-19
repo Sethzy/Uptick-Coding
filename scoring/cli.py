@@ -12,7 +12,7 @@ from typing import Optional
 
 import click
 
-from .api import score_labeled_file
+from .api import score_enriched_hubspot_file
 from .config import get_openrouter_api_key
 from .logging import log_info
 
@@ -36,17 +36,19 @@ def classify(
     model: str,
     timeout_seconds: int,
 ) -> None:
-    """Classify domains from labeled dataset using only aggregated_context field."""
+    """Classify domains from enriched HubSpot dataset using only aggregated_context field."""
     if not get_openrouter_api_key():
         raise click.ClickException("OpenRouter key not found (set OPENROUTER_API_KEY or OPENROUTER_KEY, or .env)")
 
-    log_info("🚀 Starting labeled dataset classification pipeline")
+    log_info("🚀 Starting enriched HubSpot dataset classification pipeline")
     log_info(f"📁 Input: {input_jsonl}")
     log_info(f"🤖 Model: {model}")
     log_info(f"⏱️  Timeout: {timeout_seconds}s")
+    log_info("🔒 Only 'aggregated_context' field will be used for classification")
+    log_info("💼 All enriched business fields (40+) will be preserved in output")
 
     # Run classification
-    results = score_labeled_file(
+    results = score_enriched_hubspot_file(
         input_jsonl=input_jsonl,
         output_jsonl=output_jsonl,
         model=model,
@@ -54,6 +56,7 @@ def classify(
     )
     
     log_info(f"🎉 Pipeline completed! Processed {len(results)} domains")
+    log_info("✅ All enriched business data preserved with classification results")
 
 
 

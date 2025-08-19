@@ -251,13 +251,13 @@ def score_domain(
         raise last_exc
 
 
-def score_labeled_domain(
+def score_enriched_hubspot_domain(
     *,
     record: LabeledDatasetRecord,
     model: str = None,
     timeout_seconds: int = 90,
 ) -> LabeledDatasetResult:
-    """Score a single labeled dataset record using only the aggregated_context field."""
+    """Score a single enriched HubSpot record using only the aggregated_context field."""
     # Extract only aggregated_context for scoring
     classification_result = score_domain(
         domain=record.domain,
@@ -272,14 +272,53 @@ def score_labeled_domain(
         domain=record.domain,
         aggregated_context=record.aggregated_context,
         included_urls=record.included_urls,
-        overflow=record.overflow,
+        html_keywords_found=record.html_keywords_found,
         length=record.length,
         record_id=record.record_id,
+        
+        # All enriched HubSpot CSV fields
+        company_name=record.company_name,
+        na_state=record.na_state,
+        state_county=record.state_county,
+        country=record.country,
+        company_domain_name=record.company_domain_name,
+        phone_number=record.phone_number,
+        company_owner=record.company_owner,
         lead_status=record.lead_status,
         clay_score=record.clay_score,
         associated_note=record.associated_note,
         current_software=record.current_software,
+        current_software_contract_end_date=record.current_software_contract_end_date,
         core_service=record.core_service,
+        accounting_software_us=record.accounting_software_us,
+        industry=record.industry,
+        client_use_case=record.client_use_case,
+        associated_note_ids=record.associated_note_ids,
+        perform_search=record.perform_search,
+        link_to_google_search=record.link_to_google_search,
+        results_returned_count=record.results_returned_count,
+        serper_link=record.serper_link,
+        enrich_company=record.enrich_company,
+        founded=record.founded,
+        employee_count=record.employee_count,
+        website=record.website,
+        find_contacts_at_company=record.find_contacts_at_company,
+        pic_1_name=record.pic_1_name,
+        pic_1_title=record.pic_1_title,
+        pic_1_url=record.pic_1_url,
+        pic_1_contact_info=record.pic_1_contact_info,
+        pic_2_name=record.pic_2_name,
+        pic_2_title=record.pic_2_title,
+        pic_2_url=record.pic_2_url,
+        pic_2_contact_info=record.pic_2_contact_info,
+        find_contacts_at_company_2=record.find_contacts_at_company_2,
+        pic_3_name=record.pic_3_name,
+        pic_3_title=record.pic_3_title,
+        pic_3_url=record.pic_3_url,
+        pic_3_contact_info=record.pic_3_contact_info,
+        ceo_linkedin_url_2=record.ceo_linkedin_url_2,
+        linkedin_url=record.linkedin_url,
+        
         classification_category=classification_result.classification_category,
         rationale=classification_result.rationale,
         website_quality=classification_result.website_quality,
@@ -290,25 +329,26 @@ def score_labeled_domain(
     )
 
 
-def score_labeled_file(
+def score_enriched_hubspot_file(
     *,
     input_jsonl: str,
     output_jsonl: Optional[str] = None,
     model: str = None,
     timeout_seconds: int = 90,
 ) -> List[LabeledDatasetResult]:
-    """Score a labeled dataset file, preserving all original fields and adding classification results."""
+    """Score an enriched HubSpot dataset file, preserving all original fields and adding classification results."""
     records = list(iter_labeled_dataset_from_jsonl(input_jsonl))
     
-    log_info(f"Starting classification of {len(records)} labeled dataset records using model: {model}")
+    log_info(f"Starting classification of {len(records)} enriched HubSpot records using model: {model}")
     log_info(f"Output: JSONL={output_jsonl or 'none'}")
     log_info("🔒 Only 'aggregated_context' field will be used for classification")
+    log_info(f"💼 Preserving all {len(records[0].__fields__) - 5} business fields (excluding crawler fields)")
 
     results: List[LabeledDatasetResult] = []
     for i, record in enumerate(records, 1):
         log_info(f"\n[{i}/{len(records)}] Processing domain: {record.domain}")
         try:
-            result = score_labeled_domain(
+            result = score_enriched_hubspot_domain(
                 record=record,
                 model=model,
                 timeout_seconds=timeout_seconds,
@@ -322,7 +362,7 @@ def score_labeled_file(
     log_info(f"\n✅ Completed {len(results)}/{len(records)} records successfully")
     
     if output_jsonl:
-        log_info(f"Writing labeled results to: {output_jsonl}")
+        log_info(f"Writing enriched results to: {output_jsonl}")
         write_labeled_results_jsonl(output_jsonl, results)
 
     return results
