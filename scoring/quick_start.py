@@ -14,8 +14,8 @@ from typing import Optional
 
 import click
 
-from .api import score_enriched_hubspot_file, score_raw_crawler_file
-from .config import get_openrouter_api_key
+from .api import score_raw_crawler_file
+from .config import get_openrouter_api_key, get_default_model
 from .scoring_logging import log_info
 
 
@@ -28,14 +28,18 @@ def quick_start() -> None:
 @quick_start.command()
 @click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
 @click.option("--output", "-o", help="Output file path (auto-generated if not specified)")
-@click.option("--model", "-m", default="qwen/qwen3-30b-a3b", help="LLM model to use")
+@click.option("--model", "-m", default=None, help="LLM model to use (defaults to CUSTOM_MODEL from .env)")
 @click.option("--hubspot-csv", "-h", help="HubSpot CSV file to enrich with (optional)")
-def score(input_file: str, output: Optional[str], model: str, hubspot_csv: Optional[str]) -> None:
-    """Quick score a JSONL file with sensible defaults."""
+def score(input_file: str, output: Optional[str], model: Optional[str], hubspot_csv: Optional[str]) -> None:
+    """Quick score a JSONL file with sensible defaults. Automatically handles both raw and enriched data."""
     if not get_openrouter_api_key():
         click.echo("❌ Error: OpenRouter API key not found!")
         click.echo("   Set OPENROUTER_API_KEY environment variable or create a .env file")
         sys.exit(1)
+    
+    # Get default model from config if not specified
+    if model is None:
+        model = get_default_model()
     
     # Check if we need to enrich the data first
     if hubspot_csv:
@@ -70,9 +74,11 @@ def score(input_file: str, output: Optional[str], model: str, hubspot_csv: Optio
     click.echo(f"📁 Input: {input_file}")
     click.echo(f"📤 Output: {output}")
     click.echo(f"🤖 Model: {model}")
+    click.echo("🔍 Auto-detecting data type (raw crawler or enriched)...")
     
     try:
-        results = score_enriched_hubspot_file(
+        # Use the flexible scoring function that handles both raw and enriched data
+        results = score_raw_crawler_file(
             input_jsonl=input_file,
             output_jsonl=output,
             model=model,
@@ -80,6 +86,7 @@ def score(input_file: str, output: Optional[str], model: str, hubspot_csv: Optio
         )
         click.echo(f"✅ Success! Processed {len(results)} domains")
         click.echo(f"📊 Results saved to: {output}")
+        click.echo("🎯 All fields preserved with classification results")
     except Exception as e:
         click.echo(f"❌ Error during scoring: {e}")
         sys.exit(1)
@@ -88,13 +95,17 @@ def score(input_file: str, output: Optional[str], model: str, hubspot_csv: Optio
 @quick_start.command()
 @click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
 @click.option("--output", "-o", help="Output file path (auto-generated if not specified)")
-@click.option("--model", "-m", default="qwen/qwen3-30b-a3b", help="LLM model to use")
-def score_crawler(input_file: str, output: Optional[str], model: str) -> None:
+@click.option("--model", "-m", default=None, help="LLM model to use (defaults to CUSTOM_MODEL from .env)")
+def score_crawler(input_file: str, output: Optional[str], model: Optional[str]) -> None:
     """Quick score raw crawler data, preserving all crawler fields including html_keywords_found."""
     if not get_openrouter_api_key():
         click.echo("❌ Error: OpenRouter API key not found!")
         click.echo("   Set OPENROUTER_API_KEY environment variable or create a .env file")
         sys.exit(1)
+    
+    # Get default model from config if not specified
+    if model is None:
+        model = get_default_model()
     
     # Auto-generate output filename if not provided
     if not output:
@@ -220,7 +231,7 @@ def score_sample(sample_size: int) -> None:
     click.echo(f"🧪 Running sample scoring with {sample_size} records...")
     
     # For now, just run the full scoring (you could modify the API to limit records)
-    score.callback(input_file, None, "qwen/qwen3-30b-a3b")
+    score.callback(input_file, None, get_default_model())
 
 
 if __name__ == "__main__":

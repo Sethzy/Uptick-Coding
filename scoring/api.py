@@ -17,8 +17,9 @@ import httpx
 
 from .models import ClassificationResult, LabeledDatasetRecord, LabeledDatasetResult, CrawlerRecord
 from .config import get_openrouter_api_key, get_openrouter_endpoint, get_default_model
-from .io_jsonl import iter_labeled_dataset_from_jsonl, write_labeled_results_jsonl, iter_crawler_records_from_jsonl
+from .io_jsonl import iter_labeled_dataset_from_jsonl, write_labeled_results_jsonl, iter_crawler_records_from_jsonl, iter_enriched_records_from_jsonl
 from .scoring_logging import log_info, log_error
+from .numerical_scoring import calculate_numerical_score
 
 
 # AIDEV-NOTE: Minimal schema to satisfy simplified PRD v1.
@@ -224,7 +225,9 @@ def score_domain(
                 log_info(f"  Calling LLM (attempt {attempts}/3)...")
                 obj, _meta = _call_openrouter_sync(client, cfg, prompt)
                 log_info(f"  ✅ Classified as: {obj.get('classification_category', 'Other')}")
-                return ClassificationResult(
+                
+                # Create base classification result
+                classification_result = ClassificationResult(
                     domain=domain,
                     classification_category=obj.get("classification_category", "Other"),
                     rationale=obj.get("classification_category_rationale", "No rationale provided"),
@@ -233,8 +236,22 @@ def score_domain(
                     has_certifications_and_compliance_standards=obj.get("has_certifications_and_compliance_standards", "Not Assessed"),
                     has_multiple_service_territories=obj.get("has_multiple_service_territories", "Not Assessed"),
                     has_parent_company=obj.get("has_parent_company", "Not Assessed"),
+                    using_competitor_software=obj.get("using_competitor_software", "N/A"),
+                    part_of_known_fire_protection_association=obj.get("part_of_known_fire_protection_association", "N/A"),
                     record_id=record_id,
                 )
+                
+                # Calculate numerical score
+                try:
+                    scoring_result = calculate_numerical_score(classification_result)
+                    classification_result.final_score = scoring_result["final_score"]
+                    classification_result.score_breakdown = scoring_result["score_breakdown"]
+                    log_info(f"  🔢 Numerical score: {scoring_result['final_score']}")
+                except Exception as e:
+                    log_error(f"  ⚠️  Failed to calculate numerical score: {e}")
+                    # Continue without numerical score
+                
+                return classification_result
             except httpx.HTTPStatusError as e:
                 if 400 <= e.response.status_code < 500 and e.response.status_code not in (429,):
                     log_error(f"  ❌ HTTP error: {e.response.status_code}")
@@ -250,126 +267,8 @@ def score_domain(
         raise last_exc
 
 
-def score_enriched_hubspot_domain(
-    *,
-    record: LabeledDatasetRecord,
-    model: str = None,
-    timeout_seconds: int = 90,
-) -> LabeledDatasetResult:
-    """Score a single enriched HubSpot record using only the aggregated_context field."""
-    # Extract only aggregated_context for scoring
-    classification_result = score_domain(
-        domain=record.domain,
-        aggregated_context=record.aggregated_context,
-        record_id=record.record_id,
-        model=model,
-        timeout_seconds=timeout_seconds,
-    )
-    
-    # Create result with all original fields plus classification
-    return LabeledDatasetResult(
-        domain=record.domain,
-        aggregated_context=record.aggregated_context,
-        included_urls=record.included_urls,
-        html_keywords_found=record.html_keywords_found,
-        length=record.length,
-        record_id=record.record_id,
-        
-        # Enhanced crawler logging fields
-        crawl_status=record.crawl_status,
-        failure_reason=record.failure_reason,
-        pages_visited=record.pages_visited,
-        
-        # All enriched HubSpot CSV fields
-        company_name=record.company_name,
-        na_state=record.na_state,
-        state_county=record.state_county,
-        country=record.country,
-        company_domain_name=record.company_domain_name,
-        phone_number=record.phone_number,
-        company_owner=record.company_owner,
-        lead_status=record.lead_status,
-        clay_score=record.clay_score,
-        associated_note=record.associated_note,
-        current_software=record.current_software,
-        current_software_contract_end_date=record.current_software_contract_end_date,
-        core_service=record.core_service,
-        accounting_software_us=record.accounting_software_us,
-        industry=record.industry,
-        client_use_case=record.client_use_case,
-        associated_note_ids=record.associated_note_ids,
-        perform_search=record.perform_search,
-        link_to_google_search=record.link_to_google_search,
-        results_returned_count=record.results_returned_count,
-        serper_link=record.serper_link,
-        enrich_company=record.enrich_company,
-        founded=record.founded,
-        employee_count=record.employee_count,
-        website=record.website,
-        find_contacts_at_company=record.find_contacts_at_company,
-        pic_1_name=record.pic_1_name,
-        pic_1_title=record.pic_1_title,
-        pic_1_url=record.pic_1_url,
-        pic_1_contact_info=record.pic_1_contact_info,
-        pic_2_name=record.pic_2_name,
-        pic_2_title=record.pic_2_title,
-        pic_2_url=record.pic_2_url,
-        pic_2_contact_info=record.pic_2_contact_info,
-        find_contacts_at_company_2=record.find_contacts_at_company_2,
-        pic_3_name=record.pic_3_name,
-        pic_3_title=record.pic_3_title,
-        pic_3_url=record.pic_3_url,
-        pic_3_contact_info=record.pic_3_contact_info,
-        ceo_linkedin_url_2=record.ceo_linkedin_url_2,
-        linkedin_url=record.linkedin_url,
-        
-        classification_category=classification_result.classification_category,
-        rationale=classification_result.rationale,
-        website_quality=classification_result.website_quality,
-        mostly_does_maintenance_and_service=classification_result.mostly_does_maintenance_and_service,
-        has_certifications_and_compliance_standards=classification_result.has_certifications_and_compliance_standards,
-        has_multiple_service_territories=classification_result.has_multiple_service_territories,
-        has_parent_company=classification_result.has_parent_company,
-    )
-
-
-def score_enriched_hubspot_file(
-    *,
-    input_jsonl: str,
-    output_jsonl: Optional[str] = None,
-    model: str = None,
-    timeout_seconds: int = 90,
-) -> List[LabeledDatasetResult]:
-    """Score an enriched HubSpot dataset file, preserving all original fields and adding classification results."""
-    records = list(iter_labeled_dataset_from_jsonl(input_jsonl))
-    
-    log_info(f"Starting classification of {len(records)} enriched HubSpot records using model: {model}")
-    log_info(f"Output: JSONL={output_jsonl or 'none'}")
-    log_info("🔒 Only 'aggregated_context' field will be used for classification")
-    log_info(f"💼 Preserving all {len(records[0].__fields__) - 5} business fields (excluding crawler fields)")
-
-    results: List[LabeledDatasetResult] = []
-    for i, record in enumerate(records, 1):
-        log_info(f"\n[{i}/{len(records)}] Processing domain: {record.domain}")
-        try:
-            result = score_enriched_hubspot_domain(
-                record=record,
-                model=model,
-                timeout_seconds=timeout_seconds,
-            )
-            results.append(result)
-        except Exception as e:
-            log_error(f"Failed to process {record.domain}: {e}")
-            # Continue with next record instead of failing completely
-            continue
-
-    log_info(f"\n✅ Completed {len(results)}/{len(records)} records successfully")
-    
-    if output_jsonl:
-        log_info(f"Writing enriched results to: {output_jsonl}")
-        write_labeled_results_jsonl(output_jsonl, results)
-
-    return results
+# AIDEV-NOTE: Removed redundant score_enriched_hubspot_domain and score_enriched_hubspot_file functions
+# score_raw_crawler_file now handles both raw and enriched data automatically with better field preservation
 
 
 def score_raw_crawler_file(
@@ -380,13 +279,29 @@ def score_raw_crawler_file(
     timeout_seconds: int = 90,
 ) -> List[dict]:
     """
-    Score raw crawler records (for demonstration/testing purposes).
+    Score raw crawler records, automatically detecting and preserving enriched data.
     
-    This function shows that the enhanced logging fields are preserved
-    throughout the scoring process, even though they're not used in 
-    classification.
+    This function preserves ALL fields from the input data (crawler + HubSpot fields)
+    throughout the scoring process, even though only 'aggregated_context' is used
+    for classification.
     """
-    records = list(iter_crawler_records_from_jsonl(input_jsonl))
+    # Try to detect enriched data by checking if extra fields exist
+    with open(input_jsonl, 'r') as f:
+        first_line = f.readline().strip()
+        if first_line:
+            sample_obj = json.loads(first_line)
+            # Check if this looks like enriched data (has HubSpot fields)
+            hubspot_indicators = ['Company name', 'Record ID', 'Employee Count', 'Founded']
+            is_enriched = any(field in sample_obj for field in hubspot_indicators)
+        else:
+            is_enriched = False
+    
+    if is_enriched:
+        log_info("📊 Detected enriched data (crawler + HubSpot) - preserving ALL fields")
+        records = list(iter_enriched_records_from_jsonl(input_jsonl))
+    else:
+        log_info("🔧 Detected raw crawler data - using CrawlerRecord model")
+        records = list(iter_crawler_records_from_jsonl(input_jsonl))
     
     log_info(f"Starting classification of {len(records)} raw crawler records using model: {model}")
     log_info(f"Output: JSONL={output_jsonl or 'none'}")
@@ -395,35 +310,39 @@ def score_raw_crawler_file(
 
     results: List[dict] = []
     for i, record in enumerate(records, 1):
-        log_info(f"\n[{i}/{len(records)}] Processing domain: {record.domain}")
-        log_info(f"   🎯 Status: {record.crawl_status}, Pages: {record.pages_visited}, Reason: {record.failure_reason}")
+        # Handle both dict (enriched) and CrawlerRecord objects
+        if isinstance(record, dict):
+            domain = record["domain"]
+            aggregated_context = record["aggregated_context"]
+            record_id = record.get("record_id") or record.get("Record ID")
+            crawl_status = record.get("crawl_status", "UNKNOWN")
+            pages_visited = record.get("pages_visited", 0)
+            failure_reason = record.get("failure_reason")
+        else:
+            domain = record.domain
+            aggregated_context = record.aggregated_context
+            record_id = record.record_id
+            crawl_status = record.crawl_status
+            pages_visited = record.pages_visited
+            failure_reason = record.failure_reason
+        
+        log_info(f"\n[{i}/{len(records)}] Processing domain: {domain}")
+        log_info(f"   🎯 Status: {crawl_status}, Pages: {pages_visited}, Reason: {failure_reason}")
         
         try:
             classification_result = score_domain(
-                domain=record.domain,
-                aggregated_context=record.aggregated_context,
-                record_id=record.record_id,
+                domain=domain,
+                aggregated_context=aggregated_context,
+                record_id=record_id,
                 model=model,
                 timeout_seconds=timeout_seconds,
             )
             
-            # Create result with all original fields plus classification
-            result = {
-                # Original crawler fields
-                "domain": record.domain,
-                "aggregated_context": record.aggregated_context,
-                "included_urls": record.included_urls,
-                "html_keywords_found": record.html_keywords_found,
-                "length": record.length,
-                "record_id": record.record_id,
-                
-                # Enhanced crawler logging fields (preserved!)
-                "crawl_status": record.crawl_status,
-                "failure_reason": record.failure_reason,
-                "pages_visited": record.pages_visited,
-                "overflow": record.overflow,
-                
-                # Classification results
+            # Create result preserving ALL original fields plus classification
+            result = record.dict() if hasattr(record, 'dict') else dict(record)
+            
+            # Add classification results
+            result.update({
                 "classification_category": classification_result.classification_category,
                 "rationale": classification_result.rationale,
                 "website_quality": classification_result.website_quality,
@@ -431,11 +350,15 @@ def score_raw_crawler_file(
                 "has_certifications_and_compliance_standards": classification_result.has_certifications_and_compliance_standards,
                 "has_multiple_service_territories": classification_result.has_multiple_service_territories,
                 "has_parent_company": classification_result.has_parent_company,
-            }
+                "using_competitor_software": classification_result.using_competitor_software,
+                "part_of_known_fire_protection_association": classification_result.part_of_known_fire_protection_association,
+                "final_score": classification_result.final_score,
+                "score_breakdown": classification_result.score_breakdown,
+            })
             results.append(result)
             
         except Exception as e:
-            log_error(f"Failed to process {record.domain}: {e}")
+            log_error(f"Failed to process {domain}: {e}")
             # Continue with next record instead of failing completely
             continue
 

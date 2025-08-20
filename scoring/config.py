@@ -27,6 +27,7 @@ def get_openrouter_endpoint() -> str:
 
 def get_default_model() -> str:
     """Get the default LLM model from environment variables."""
-    return os.getenv("DEFAULT_LLM_MODEL", "qwen/qwen3-30b-a3b")
+    # AIDEV-NOTE: Use CUSTOM_MODEL from .env as the primary default, fallback to DEFAULT_LLM_MODEL
+    return os.getenv("CUSTOM_MODEL") or os.getenv("DEFAULT_LLM_MODEL", "qwen/qwen3-30b-a3b")
 
 

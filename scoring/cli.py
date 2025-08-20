@@ -12,8 +12,8 @@ from typing import Optional
 
 import click
 
-from .api import score_enriched_hubspot_file, score_raw_crawler_file
-from .config import get_openrouter_api_key
+from .api import score_raw_crawler_file
+from .config import get_openrouter_api_key, get_default_model
 from .scoring_logging import log_info
 
 
@@ -28,69 +28,96 @@ def scorer() -> None:
 @scorer.command()
 @click.option("--input-jsonl", required=True, type=click.Path(exists=True, dir_okay=False))
 @click.option("--output-jsonl", required=False, type=click.Path(dir_okay=False))
-@click.option("--model", default="qwen/qwen3-30b-a3b", show_default=True)
+@click.option("--model", default=None, show_default=True, help="LLM model to use")
 @click.option("--timeout-seconds", default=90, type=int, show_default=True)
 def classify(
     input_jsonl: str,
-    output_jsonl: Optional[str],
-    model: str,
+    output_jsonl: str | None,
+    model: str | None,
     timeout_seconds: int,
 ) -> None:
-    """Classify domains from enriched HubSpot dataset using only aggregated_context field."""
+    """Classify domains using LLM scoring. Automatically handles both raw and enriched data."""
     if not get_openrouter_api_key():
-        raise click.ClickException("OpenRouter key not found (set OPENROUTER_API_KEY or OPENROUTER_KEY, or .env)")
-
-    log_info("🚀 Starting enriched HubSpot dataset classification pipeline")
-    log_info(f"📁 Input: {input_jsonl}")
-    log_info(f"🤖 Model: {model}")
-    log_info(f"⏱️  Timeout: {timeout_seconds}s")
-    log_info("🔒 Only 'aggregated_context' field will be used for classification")
-    log_info("💼 All enriched business fields (40+) will be preserved in output")
-
-    # Run classification
-    results = score_enriched_hubspot_file(
-        input_jsonl=input_jsonl,
-        output_jsonl=output_jsonl,
-        model=model,
-        timeout_seconds=timeout_seconds,
-    )
+        click.echo("❌ Error: OpenRouter API key not found!")
+        click.echo("   Set OPENROUTER_API_KEY environment variable")
+        sys.exit(1)
     
-    log_info(f"🎉 Pipeline completed! Processed {len(results)} domains")
-    log_info("✅ All enriched business data preserved with classification results")
+    # Get default model from config if not specified
+    if model is None:
+        model = get_default_model()
+    
+    if not output_jsonl:
+        input_path = Path(input_jsonl)
+        output_jsonl = str(input_path.parent / f"{input_path.stem}_scored{input_path.suffix}")
+    
+    click.echo(f"🚀 Starting classification...")
+    click.echo(f"📁 Input: {input_jsonl}")
+    click.echo(f"📤 Output: {output_jsonl}")
+    click.echo(f"🤖 Model: {model}")
+    click.echo(f"⏱️  Timeout: {timeout_seconds}s")
+    click.echo("🔍 Auto-detecting data type (raw crawler or enriched)...")
+    
+    try:
+        # Use the flexible scoring function that handles both raw and enriched data
+        results = score_raw_crawler_file(
+            input_jsonl=input_jsonl,
+            output_jsonl=output_jsonl,
+            model=model,
+            timeout_seconds=timeout_seconds,
+        )
+        click.echo(f"✅ Success! Processed {len(results)} domains")
+        click.echo(f"📊 Results saved to: {output_jsonl}")
+        click.echo("🎯 All fields preserved with classification results")
+    except Exception as e:
+        click.echo(f"❌ Error during classification: {e}")
+        sys.exit(1)
 
 
 @scorer.command()
 @click.option("--input-jsonl", required=True, type=click.Path(exists=True, dir_okay=False))
 @click.option("--output-jsonl", required=False, type=click.Path(dir_okay=False))
-@click.option("--model", default="qwen/qwen3-30b-a3b", show_default=True)
+@click.option("--model", default=None, show_default=True, help="LLM model to use")
 @click.option("--timeout-seconds", default=90, type=int, show_default=True)
 def score_crawler(
     input_jsonl: str,
-    output_jsonl: Optional[str],
-    model: str,
+    output_jsonl: str | None,
+    model: str | None,
     timeout_seconds: int,
 ) -> None:
-    """Classify domains from raw crawler data, preserving all crawler fields including html_keywords_found."""
+    """Score raw crawler data, preserving all crawler fields."""
     if not get_openrouter_api_key():
-        raise click.ClickException("OpenRouter key not found (set OPENROUTER_API_KEY or OPENROUTER_KEY, or .env)")
-
-    log_info("🚀 Starting raw crawler data classification pipeline")
-    log_info(f"📁 Input: {input_jsonl}")
-    log_info(f"🤖 Model: {model}")
-    log_info(f"⏱️  Timeout: {timeout_seconds}s")
-    log_info("🔒 Only 'aggregated_context' field will be used for classification")
-    log_info("📊 All crawler fields (html_keywords_found, included_urls, length, etc.) will be preserved")
-
-    # Run classification
-    results = score_raw_crawler_file(
-        input_jsonl=input_jsonl,
-        output_jsonl=output_jsonl,
-        model=model,
-        timeout_seconds=timeout_seconds,
-    )
+        click.echo("❌ Error: OpenRouter API key not found!")
+        click.echo("   Set OPENROUTER_API_KEY environment variable")
+        sys.exit(1)
     
-    log_info(f"🎉 Pipeline completed! Processed {len(results)} domains")
-    log_info("✅ All crawler fields preserved with classification results")
+    # Get default model from config if not specified
+    if model is None:
+        model = get_default_model()
+    
+    if not output_jsonl:
+        input_path = Path(input_jsonl)
+        output_jsonl = str(input_path.parent / f"{input_path.stem}_scored{input_path.suffix}")
+    
+    click.echo(f"🚀 Starting raw crawler scoring...")
+    click.echo(f"📁 Input: {input_jsonl}")
+    click.echo(f"📤 Output: {output_jsonl}")
+    click.echo(f"🤖 Model: {model}")
+    click.echo(f"⏱️  Timeout: {timeout_seconds}s")
+    click.echo("📊 All crawler fields (html_keywords_found, included_urls, length, etc.) will be preserved")
+    
+    try:
+        results = score_raw_crawler_file(
+            input_jsonl=input_jsonl,
+            output_jsonl=output_jsonl,
+            model=model,
+            timeout_seconds=timeout_seconds,
+        )
+        click.echo(f"✅ Success! Processed {len(results)} domains")
+        click.echo(f"📊 Results saved to: {output_jsonl}")
+        click.echo("🎯 All crawler fields preserved with classification results")
+    except Exception as e:
+        click.echo(f"❌ Error during scoring: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":  # pragma: no cover

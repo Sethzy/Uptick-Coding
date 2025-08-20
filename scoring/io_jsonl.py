@@ -34,6 +34,17 @@ def iter_crawler_records_from_jsonl(path: str) -> Iterable[CrawlerRecord]:
             yield CrawlerRecord.model_validate(obj)
 
 
+def iter_enriched_records_from_jsonl(path: str) -> Iterable[dict]:
+    """Read enriched records (crawler + HubSpot) from JSONL file, preserving all fields."""
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            yield obj
+
+
 def write_labeled_results_jsonl(path: str, results: Iterable[LabeledDatasetResult]) -> None:
     """Write labeled dataset results with classification to JSONL file."""
     with open(path, "w", encoding="utf-8") as f:

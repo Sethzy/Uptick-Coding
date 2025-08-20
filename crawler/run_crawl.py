@@ -72,9 +72,14 @@ def main() -> int:
 
     log_event(logger, "startup", details=runtime)
 
+    # Runtime config
+    cfg_path = os.path.join(os.getcwd(), "config.json")
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+
     # CLI flags
     parser = argparse.ArgumentParser(description="Targeted domain crawler (PRD aligned)")
-    parser.add_argument("--input-csv", default=os.path.join(os.getcwd(), "uptick-csvs", "final_merged_hubspot_tam_data_resolved.csv"))
+    parser.add_argument("--input-csv", default=cfg.get("csv_input", {}).get("default_file", "uptick-csvs/domains.csv"))
     parser.add_argument("--output-jsonl", default=os.path.join(os.getcwd(), "llm-input.jsonl"))
     parser.add_argument("--checkpoint", default=os.path.join(os.getcwd(), ".crawl-checkpoint.json"))
     parser.add_argument("--from-index", type=int, default=0)
@@ -82,18 +87,21 @@ def main() -> int:
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--column", default="tam_site", help="CSV column to read domains from (default: tam_site)")
-    parser.add_argument("--id-column", default="Record ID", help="CSV column name for stable record ID to carry through outputs")
+    parser.add_argument("--column", default=cfg.get("csv_input", {}).get("domain_column", "tam_site"), help="CSV column to read domains from")
+    parser.add_argument("--id-column", default=cfg.get("csv_input", {}).get("id_column", "Record ID"), help="CSV column name for stable record ID to carry through outputs")
     parser.add_argument("--robots", choices=["respect", "ignore", "auto"], default="auto", help="Robots handling: respect, ignore, or auto (use config)")
     args = parser.parse_args()
 
-    # Runtime config
-    cfg_path = os.path.join(os.getcwd(), "config.json")
-    with open(cfg_path, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-
     # Load domains and optional record IDs
     try:
+        # Log CSV configuration
+        csv_config = {
+            "input_file": args.input_csv,
+            "domain_column": args.column,
+            "id_column": args.id_column
+        }
+        log_event(logger, "csv_config", details=csv_config)
+        
         # Prefer domain+id pairs to preserve 1:1 mapping to input rows
         domain_id_pairs = load_domain_id_pairs_from_csv(
             args.input_csv, domain_column=args.column, id_column=args.id_column

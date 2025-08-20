@@ -1,13 +1,13 @@
 """
-Purpose: Public API surface for the scoring module.
-Description: Exposes the main scoring functions for external use.
-Key Functions/Classes: `score_domain`, `score_enriched_hubspot_domain`, `score_enriched_hubspot_file`.
+Purpose: Uptick scoring module for domain classification using LLM.
+Description: Provides domain scoring, classification, and numerical scoring capabilities.
+Key Functions/Classes: `score_domain`, `score_raw_crawler_file`.
+Note: Now uses unified scoring that automatically handles both raw and enriched data.
 """
 
-from .api import score_domain, score_enriched_hubspot_domain, score_enriched_hubspot_file
+from .api import score_domain, score_raw_crawler_file
 
 __all__ = [
     "score_domain",
-    "score_enriched_hubspot_domain", 
-    "score_enriched_hubspot_file",
+    "score_raw_crawler_file",
 ]
