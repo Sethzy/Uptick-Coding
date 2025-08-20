@@ -1,0 +1,17 @@
+[project]
+name = "uptick-scoring"
+version = "0.1.0"
+description = "Lightweight LLM scoring pipeline"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.27.0",
+    "click>=8.1.7",
+    "pydantic>=2.8.2",
+    "python-dotenv>=1.0.1",
+]
+
+[project.scripts]
+scorer = "scoring.cli:scorer"
+quick-score = "scoring.quick_start:quick_start"
+
+

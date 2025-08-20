@@ -11,7 +11,7 @@ The agent will only have access to the codebase and the final research document 
     - Search for similar features, components, or logic within the current codebase.
     - Identify existing conventions, principles, patterns, and architectural choices to follow for consistency.
     - Note any relevant modules, services, or APIs that will need to be integrated.
-    - Note how we can build upon the existing architecture rather than introducing completely new paradigms. Identify extension points in the current design and leverage them for new functionality. Focus on backward compatibility to ensure existing features continue to work as expected.
+    - Note how we can build upon the existing architecture rather than introducing completely new paradigms. Identify extension points in the current design and leverage them for new functionality.
     - Before creating new pages, components, or flows, conduct a thorough inventory of existing elements in the codebase. Search for similar functionality using relevant keywords and file patterns. Identify opportunities to reuse or extend existing components rather than creating duplicates. When similar features exist, analyze them to understand if they can be parameterized or adapted instead of duplicated. Maintain a mental model of the application’s structure to recognize when proposed solutions might create redundant elements. When similar pages or flows are needed, consider creating abstracted components that can be reused with different data or configurations, promoting DRY (Don’t Repeat Yourself) principles.
 
 2.  **External Research**

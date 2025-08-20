@@ -1,0 +1,83 @@
+{
+  "csv_input": {
+    "default_file": "../uptick-csvs/filtered-records.csv",
+    "domain_column": "Company Domain Name",
+    "id_column": "Record ID"
+  },
+  "html_keywords": [
+    "building report",
+    "BuildingReports.com",
+    "inspect point",
+    "inspectpoint.com",
+    "inspectpoint",
+    "buildops",
+    "buildops.com",
+    "Service Trade",
+    "servicetrade.com",
+    "NFPA",
+    "National Fire Protection Association",
+    "NAFED",
+    "National Association of Fire Equipment Distributors",
+    "AFSA",
+    "American Fire Sprinkler Association",
+    "NFSA",
+    "National Fire Sprinkler Association",
+    "CFSA",
+    "CASA",
+    "Canadian Automatic Sprinkler Association",
+    "Canadian Fire Safety Association"
+  ],
+  "disallowed_paths": [
+    "/privacy",
+    "/terms",
+    "/cookie",
+    "/legal",
+    "/sso"
+  ],
+  "page_cap": 5,
+  "per_domain_delay_seconds": {
+    "min": 1.5,
+    "max": 2.0,
+    "jitter": 0.4
+  },
+  "global_concurrency": 2,
+  "retries": 2,
+  "page_timeout_ms": 60000,
+  "canonicalization_timeout_sec": 12.0,
+  "canonicalization_retries": 2,
+  "allow_blog_if_signals": true,
+  "exclude_external_links": true,
+  "excluded_tags": [
+    "nav",
+    "footer",
+    "script",
+    "style"
+  ],
+  "respect_robots": false,
+  "robots_overrides": [
+    "fpsweb.net"
+  ],
+  "content_filter_threshold": 0.2,
+  "sampling_ignore_robots": true,
+  "emit_links": false,
+  "content_selectors": [
+    "main",
+    "article",
+    "#content",
+    ".content",
+    ".main",
+    ".main-content",
+    ".container .content",
+    "#primary",
+    "section#services",
+    ".services",
+    ".services-section",
+    ".our-services",
+    "#main-content",
+    ".content-area",
+    ".page-content",
+    ".container section",
+    ".container .row",
+    ".section"
+  ]
+}

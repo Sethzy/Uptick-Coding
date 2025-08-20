@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<!--
+  Purpose: In-browser previewer for classifications JSON/JSONL (multiple companies).
+  Description: Drop or open any JSON/JSONL file where each record contains a domain and
+  classification fields. Renders a list of cards showing domain, category, confidence,
+  with optional rationale and evidence details. No hardcoded data; all fields are
+  auto-detected with a minimal mapping UI to override and persisted per file.
+  Key Sections: parseJsonOrJsonl, detectMappings, renderList, config panel.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Classifications Preview</title>
+    <link rel="preconnect" href="https://unpkg.com" />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        line-height: 1.45;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        background: Canvas;
+        border-bottom: 1px solid rgb(0 0 0 / 10%);
+        padding: 14px 16px;
+        z-index: 10;
+      }
+      h1 {
+        margin: 0 0 6px 0;
+        font-size: 20px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .muted {
+        opacity: 0.75;
+        font-size: 13px;
+      }
+      button,
+      select {
+        font: inherit;
+        padding: 8px 10px;
+        border: 1px solid rgb(0 0 0 / 20%);
+        border-radius: 8px;
+        background: Field;
+        color: FieldText;
+      }
+      main {
+        padding: 16px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+        gap: 16px;
+      }
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .card {
+        border: 1px solid rgb(0 0 0 / 12%);
+        border-radius: 12px;
+        background: Canvas;
+        overflow: hidden;
+        transition: box-shadow 0.2s ease;
+      }
+      .card:hover {
+        box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
+      }
+      .card header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding: 16px;
+        border-bottom: 1px solid rgb(0 0 0 / 10%);
+        background: color-mix(in oklab, Canvas 95%, CanvasText 5%);
+      }
+      .card .content {
+        padding: 16px;
+      }
+      .title {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+        flex: 1;
+      }
+      .domain {
+        font-weight: 600;
+        font-size: 16px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: color-mix(in oklab, CanvasText 90%, Canvas 10%);
+      }
+      .category {
+        font-size: 14px;
+        font-weight: 500;
+        color: color-mix(in oklab, CanvasText 70%, Canvas 30%);
+      }
+      .pill {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 999px;
+        background: color-mix(in oklab, CanvasText 10%, Canvas 90%);
+        font-size: 12px;
+        font-weight: 500;
+        opacity: 0.9;
+        white-space: nowrap;
+      }
+      .details {
+        margin-top: 12px;
+        display: none;
+      }
+      .rationale {
+        background: color-mix(in oklab, Canvas 98%, CanvasText 2%);
+        border: 1px solid rgb(0 0 0 / 8%);
+        border-radius: 8px;
+        padding: 12px;
+        margin-top: 8px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .evidence {
+        margin-top: 12px;
+        font-size: 13px;
+      }
+      .evidence-item {
+        border-left: 3px solid rgb(0 0 0 / 12%);
+        padding: 8px 12px;
+        margin: 8px 0;
+        background: color-mix(in oklab, Canvas 98%, CanvasText 2%);
+        border-radius: 0 6px 6px 0;
+      }
+      .controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .toggle {
+        background: color-mix(in oklab, CanvasText 10%, Canvas 90%);
+        border: 1px solid rgb(0 0 0 / 15%);
+        color: CanvasText;
+        font-size: 12px;
+        padding: 6px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      .toggle:hover {
+        background: color-mix(in oklab, CanvasText 15%, Canvas 85%);
+      }
+      .confidence-high {
+        background: #dcfce7;
+        color: #166534;
+      }
+      .confidence-medium {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .confidence-low {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .confidence-unknown {
+        background: #f3f4f6;
+        color: #374151;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Classifications Preview</h1>
+      <div class="row" style="margin-top: 6px">
+        <div class="muted">Source: <code id="sourceLabel">(no file)</code></div>
+        <input
+          type="file"
+          id="fileInput"
+          accept=".json,.jsonl"
+          style="display: none"
+        />
+        <button id="openBtn" title="Open JSON/JSONL file">Open file</button>
+        <button id="configBtn" title="Configure field mappings">
+          Configure
+        </button>
+      </div>
+    </header>
+    <main>
+      <div class="row" style="margin-bottom: 16px">
+        <input
+          id="search"
+          placeholder="Filter by domain or category..."
+          style="
+            flex: 1;
+            min-width: 300px;
+            padding: 10px 12px;
+            border: 1px solid rgb(0 0 0 / 20%);
+            border-radius: 8px;
+            background: Field;
+            color: FieldText;
+            font-size: 14px;
+          "
+        />
+        <span class="muted" id="stats">0 results</span>
+      </div>
+      <section id="list" class="grid"></section>
+
+      <!-- Config panel -->
+      <section
+        id="configPanel"
+        class="card"
+        style="margin-top: 16px; display: none"
+      >
+        <header>
+          <div class="title">
+            <div class="domain">Configure field mappings</div>
+            <div class="muted">Override detected keys below</div>
+          </div>
+          <div class="controls">
+            <button id="applyConfig">Apply</button>
+          </div>
+        </header>
+        <div class="content" style="display: flex; gap: 16px; flex-wrap: wrap">
+          <label
+            >Domain key
+            <select id="domainKey"></select
+          ></label>
+          <label
+            >Category key
+            <select id="categoryKey"></select
+          ></label>
+          <label
+            >Confidence key
+            <select id="confidenceKey"></select
+          ></label>
+          <label
+            >Rationale key
+            <select id="rationaleKey"></select
+          ></label>
+          <label
+            >Evidence key
+            <select id="evidenceKey"></select
+          ></label>
+          <label
+            >Evidence snippet key
+            <select id="evidenceSnippetKey"></select
+          ></label>
+          <label
+            >Evidence URL key
+            <select id="evidenceUrlKey"></select
+          ></label>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      // AIDEV-NOTE: Minimal inline helpers; no external utils
+      function parseJsonOrJsonl(text) {
+        const trimmed = String(text || "").trim();
+        if (!trimmed) return [];
+        const first = trimmed[0];
+        if (first === "{" || first === "[") {
+          try {
+            const parsed = JSON.parse(trimmed);
+            return Array.isArray(parsed) ? parsed : [parsed];
+          } catch {}
+        }
+        return trimmed
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .map((line) => {
+            try {
+              return JSON.parse(line);
+            } catch {
+              return null;
+            }
+          })
+          .filter((x) => x && typeof x === "object");
+      }
+      function unionObjectKeys(records, limit = 200) {
+        const keys = new Set();
+        for (let i = 0; i < Math.min(records.length, limit); i++) {
+          const r = records[i];
+          if (r && typeof r === "object")
+            Object.keys(r).forEach((k) => keys.add(k));
+        }
+        return Array.from(keys);
+      }
+      function detectKey(candidates, obj) {
+        if (!obj || typeof obj !== "object") return null;
+        const map = Object.keys(obj).reduce((acc, k) => {
+          acc[k.toLowerCase()] = k;
+          return acc;
+        }, {});
+        for (const cand of candidates) {
+          const found = map[cand.toLowerCase()];
+          if (found) return found;
+        }
+        return null;
+      }
+      function detectMappings(sample) {
+        const domainKey =
+          detectKey(["domain", "hostname", "label", "company"], sample) ||
+          "domain";
+        const categoryKey =
+          detectKey(["classification_category", "category", "label"], sample) ||
+          "classification_category";
+        const confidenceKey =
+          detectKey(["confidence", "score", "probability"], sample) ||
+          "confidence";
+        const rationaleKey =
+          detectKey(
+            ["rationale", "reason", "explanation", "analysis"],
+            sample
+          ) || "rationale";
+        const evidenceKey =
+          detectKey(["evidence", "sources", "citations"], sample) || "evidence";
+        // Evidence item sample
+        const ev0 = Array.isArray(sample?.[evidenceKey])
+          ? sample[evidenceKey][0]
+          : null;
+        const evidenceSnippetKey =
+          detectKey(["snippet", "text", "quote"], ev0) || "snippet";
+        const evidenceUrlKey = detectKey(["url", "link", "href"], ev0) || "url";
+        return {
+          domainKey,
+          categoryKey,
+          confidenceKey,
+          rationaleKey,
+          evidenceKey,
+          evidenceSnippetKey,
+          evidenceUrlKey,
+        };
+      }
+      function getConfidenceClass(confidence) {
+        if (confidence === undefined || confidence === null)
+          return "confidence-unknown";
+        const num = parseFloat(confidence);
+        if (isNaN(num)) return "confidence-unknown";
+        if (num >= 0.8) return "confidence-high";
+        if (num >= 0.6) return "confidence-medium";
+        return "confidence-low";
+      }
+      function saveMapping(kind, sourceKey, mapping) {
+        try {
+          localStorage.setItem(
+            `previewer:mapping:${kind}:${sourceKey}`,
+            JSON.stringify(mapping)
+          );
+        } catch {}
+      }
+      function loadMapping(kind, sourceKey) {
+        try {
+          const raw = localStorage.getItem(
+            `previewer:mapping:${kind}:${sourceKey}`
+          );
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      }
+      function wireGlobalDropZone(onFileText) {
+        const prevent = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        };
+        window.addEventListener("dragover", prevent);
+        window.addEventListener("dragenter", prevent);
+        window.addEventListener("drop", async (e) => {
+          prevent(e);
+          const file = e.dataTransfer?.files?.[0];
+          if (!file) return;
+          try {
+            const text = await file.text();
+            onFileText(text, file.name || "dropped.jsonl");
+          } catch (err) {
+            console.error(err);
+          }
+        });
+      }
+
+      const state = {
+        items: [],
+        mapping: {
+          domainKey: "domain",
+          categoryKey: "classification_category",
+          confidenceKey: "confidence",
+          rationaleKey: "rationale",
+          evidenceKey: "evidence",
+          evidenceSnippetKey: "snippet",
+          evidenceUrlKey: "url",
+        },
+        sourceKey: "session",
+        keys: [],
+      };
+
+      function el(id) {
+        return document.getElementById(id);
+      }
+
+      function applyLoadedText(text, filename) {
+        const items = parseJsonOrJsonl(text);
+        if (!items.length) throw new Error("No records found in file");
+        state.items = items;
+        state.sourceKey = filename ? `file:${filename}` : state.sourceKey;
+        state.keys = unionObjectKeys(items);
+        const saved = loadMapping("classifications", state.sourceKey);
+        state.mapping = saved || detectMappings(items[0] || {});
+        el("sourceLabel").textContent = filename || "(in-memory)";
+        buildConfigPanel();
+        renderList();
+      }
+
+      function renderList() {
+        const list = el("list");
+        const q = el("search").value.trim().toLowerCase();
+        const m = state.mapping;
+        const filtered = state.items.filter((it) => {
+          const dom = String(it[m.domainKey] || "").toLowerCase();
+          const cat = String(it[m.categoryKey] || "").toLowerCase();
+          return !q || dom.includes(q) || cat.includes(q);
+        });
+        el("stats").textContent = `${filtered.length} result${
+          filtered.length === 1 ? "" : "s"
+        }`;
+        list.innerHTML = "";
+        for (const it of filtered) {
+          const domain = it[m.domainKey] ?? "";
+          const category = it[m.categoryKey] ?? "";
+          const confidence = it[m.confidenceKey] ?? "";
+          const rationale = it[m.rationaleKey] ?? "";
+          const evidence = Array.isArray(it[m.evidenceKey])
+            ? it[m.evidenceKey]
+            : [];
+
+          const card = document.createElement("article");
+          card.className = "card";
+          card.innerHTML = `
+            <header>
+              <div class="title">
+                <div class="domain">${escapeHtml(domain)}</div>
+                <div class="category">${escapeHtml(category)}</div>
+              </div>
+              <div class="controls">
+                ${
+                  confidence !== undefined && confidence !== null
+                    ? `<span class="pill ${getConfidenceClass(
+                        confidence
+                      )}" title="Confidence">${escapeHtml(
+                        String(confidence)
+                      )}</span>`
+                    : ""
+                }
+                <button class="toggle">Details</button>
+              </div>
+            </header>
+            <div class="content">
+              <div class="details" hidden>
+                ${
+                  rationale
+                    ? `<div class="rationale">${escapeHtml(
+                        String(rationale)
+                      )}</div>`
+                    : ""
+                }
+                ${
+                  evidence && evidence.length ? renderEvidence(evidence, m) : ""
+                }
+              </div>
+            </div>
+          `;
+          const details = card.querySelector(".details");
+          const toggle = card.querySelector(".toggle");
+          toggle.addEventListener("click", () => {
+            const isHidden = details.hasAttribute("hidden");
+            if (isHidden) {
+              details.removeAttribute("hidden");
+              details.style.display = "block";
+              toggle.textContent = "Hide";
+            } else {
+              details.setAttribute("hidden", "");
+              details.style.display = "none";
+              toggle.textContent = "Details";
+            }
+          });
+          list.appendChild(card);
+        }
+      }
+
+      function renderEvidence(evidence, m) {
+        const rows = evidence.map((ev) => {
+          const snip = ev?.[m.evidenceSnippetKey] ?? "";
+          const url = ev?.[m.evidenceUrlKey] ?? "";
+          const link = url
+            ? `<a href="${escapeHtml(
+                String(url)
+              )}" target="_blank" rel="noopener noreferrer">${escapeHtml(
+                String(url)
+              )}</a>`
+            : "";
+          return `<div class="evidence-item"><div>${escapeHtml(
+            String(snip)
+          )}</div>${
+            link
+              ? `<div class="muted" style="margin-top:4px">${link}</div>`
+              : ""
+          }</div>`;
+        });
+        return `<div class="evidence"><div class="muted">Evidence (${
+          evidence.length
+        })</div>${rows.join("")}</div>`;
+      }
+
+      function buildConfigPanel() {
+        const keys = state.keys.length
+          ? state.keys
+          : Object.keys(state.items[0] || {});
+        function fill(id, current, allowEmpty = false) {
+          const sel = el(id);
+          sel.innerHTML = "";
+          if (allowEmpty) {
+            const o = document.createElement("option");
+            o.value = "";
+            o.textContent = "(none)";
+            sel.appendChild(o);
+          }
+          keys.forEach((k) => {
+            const o = document.createElement("option");
+            o.value = k;
+            o.textContent = k;
+            sel.appendChild(o);
+          });
+          sel.value = current || (allowEmpty ? "" : keys[0] || "");
+        }
+        const m = state.mapping;
+        fill("domainKey", m.domainKey);
+        fill("categoryKey", m.categoryKey);
+        fill("confidenceKey", m.confidenceKey);
+        fill("rationaleKey", m.rationaleKey, true);
+        fill("evidenceKey", m.evidenceKey, true);
+        // Evidence item keys: derive from first evidence item when available
+        const evs = Array.isArray(state.items?.[0]?.[m.evidenceKey])
+          ? state.items[0][m.evidenceKey]
+          : [];
+        const evKeys = unionObjectKeys(evs);
+        const selSnippet = el("evidenceSnippetKey");
+        selSnippet.innerHTML = "";
+        evKeys.forEach((k) => {
+          const o = document.createElement("option");
+          o.value = k;
+          o.textContent = k;
+          selSnippet.appendChild(o);
+        });
+        selSnippet.value = m.evidenceSnippetKey || evKeys[0] || "";
+        const selUrl = el("evidenceUrlKey");
+        selUrl.innerHTML = "";
+        evKeys.forEach((k) => {
+          const o = document.createElement("option");
+          o.value = k;
+          o.textContent = k;
+          selUrl.appendChild(o);
+        });
+        selUrl.value = m.evidenceUrlKey || evKeys[0] || "";
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            }[c])
+        );
+      }
+
+      (function init() {
+        try {
+          wireGlobalDropZone((text, name) => {
+            try {
+              applyLoadedText(text, name);
+            } catch (e) {
+              showError(e);
+            }
+          });
+          el("openBtn").addEventListener("click", () =>
+            el("fileInput").click()
+          );
+          el("fileInput").addEventListener("change", async (e) => {
+            const f = e.target.files?.[0];
+            if (!f) return;
+            const text = await f.text();
+            applyLoadedText(text, f.name);
+          });
+          el("configBtn").addEventListener("click", () => {
+            const p = el("configPanel");
+            p.style.display = p.style.display === "none" ? "block" : "none";
+          });
+          el("applyConfig").addEventListener("click", () => {
+            const domainKey = el("domainKey").value || state.mapping.domainKey;
+            const categoryKey =
+              el("categoryKey").value || state.mapping.categoryKey;
+            const confidenceKey =
+              el("confidenceKey").value || state.mapping.confidenceKey;
+            const rationaleKey =
+              el("rationaleKey").value || state.mapping.rationaleKey;
+            const evidenceKey =
+              el("evidenceKey").value || state.mapping.evidenceKey;
+            const evidenceSnippetKey =
+              el("evidenceSnippetKey").value ||
+              state.mapping.evidenceSnippetKey;
+            const evidenceUrlKey =
+              el("evidenceUrlKey").value || state.mapping.evidenceUrlKey;
+            state.mapping = {
+              domainKey,
+              categoryKey,
+              confidenceKey,
+              rationaleKey,
+              evidenceKey,
+              evidenceSnippetKey,
+              evidenceUrlKey,
+            };
+            saveMapping("classifications", state.sourceKey, state.mapping);
+            renderList();
+          });
+          el("search").addEventListener("input", () => renderList());
+        } catch (err) {
+          showError(err);
+        }
+      })();
+
+      function showError(err) {
+        document.body.innerHTML = `<pre style="padding:16px">${String(
+          err
+        )}</pre>`;
+        console.error(err);
+      }
+    </script>
+  </body>
+</html>

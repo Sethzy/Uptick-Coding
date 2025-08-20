@@ -1,0 +1,232 @@
+"""
+Purpose: Generate human-readable Markdown summaries for aggregated context runs.
+Description: Reads aggregated per-domain JSONL records (domain, aggregated_context,
+             included_urls, overflow, length) and renders a concise Markdown report
+             with an overview table and per-domain details. This version assumes the
+             new Aggregated Context Builder output shape (no backward compatibility).
+Key Functions: generate_markdown_report
+
+AIDEV-NOTE: Keep formatting stable for downstream diffing and human review.
+"""
+
+from __future__ import annotations
+from typing import Any, Dict, List, Sequence
+import json
+import os
+
+from reachability import load_domains_from_csv
+
+
+def _safe_title(s: Any) -> str:
+    if not isinstance(s, str) or not s.strip():
+        return "(no title)"
+    return s
+
+
+def _content_sample(text: str, *, max_chars: int = 360) -> str:
+    if not text:
+        return ""
+    s = text.strip().replace("\n", "\n")
+    if len(s) <= max_chars:
+        return s
+    return s[:max_chars].rstrip() + "…"
+
+
+def _domain_heading(run_dir: str) -> str:
+    run_name = os.path.basename(run_dir.rstrip("/")) if run_dir else ""
+    if run_name:
+        return f"## {run_name} Crawl Results"
+    return "## Crawl Results"
+
+
+def _overview_table(records_by_domain: Dict[str, Dict], ordered_domains: Sequence[str]) -> List[str]:
+    lines: List[str] = []
+    lines.append("### Overview")
+    lines.append("")
+    lines.append("| Domain | Status | Pages Visited | Included URLs | Overflow | Length (chars) | Approx tokens |")
+    lines.append("| --- | --- | ---: | ---: | --- | ---: | ---: |")
+    for domain in ordered_domains:
+        rec = records_by_domain.get(domain)
+        if rec is None:
+            continue
+        included_urls = rec.get("included_urls") or []
+        if not isinstance(included_urls, list):
+            included_urls = []
+        overflow = bool(rec.get("overflow", False))
+        length = rec.get("length") or {}
+        chars = int((length.get("chars") or 0) if isinstance(length, dict) else 0)
+        toks = int((length.get("approx_tokens") or 0) if isinstance(length, dict) else 0)
+        
+        # New fields
+        status = rec.get("crawl_status", "UNKNOWN")
+        pages_visited = rec.get("pages_visited", 0)
+        
+        lines.append(f"| {domain} | {status} | {pages_visited} | {len(included_urls)} | {overflow} | {chars} | {toks} |")
+    lines.append("")
+    return lines
+
+
+def _aggregate_stats(records_by_domain: Dict[str, Dict]) -> List[str]:
+    """Generate aggregate statistics for crawl status and failure reasons."""
+    lines: List[str] = []
+    lines.append("### Aggregate Statistics")
+    lines.append("")
+    
+    # Count by status
+    status_counts = {}
+    failure_reason_counts = {}
+    total_domains = len(records_by_domain)
+    
+    for rec in records_by_domain.values():
+        status = rec.get("crawl_status", "UNKNOWN")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        
+        # Count failure reasons
+        if status == "FAIL":
+            failure_reason = rec.get("failure_reason") or "UNKNOWN"
+            failure_reason_counts[failure_reason] = failure_reason_counts.get(failure_reason, 0) + 1
+    
+    # Status summary
+    lines.append("#### Crawl Status Summary")
+    lines.append("")
+    for status, count in sorted(status_counts.items()):
+        percentage = (count / total_domains) * 100 if total_domains > 0 else 0
+        lines.append(f"- **{status}**: {count} domains ({percentage:.1f}%)")
+    
+    lines.append("")
+    
+    # Failure reasons breakdown
+    if failure_reason_counts:
+        lines.append("#### Failure Reasons Breakdown")
+        lines.append("")
+        for reason, count in sorted(failure_reason_counts.items()):
+            lines.append(f"- **{reason}**: {count} domains")
+        lines.append("")
+    
+    # Total pages visited
+    total_pages = sum(rec.get("pages_visited", 0) for rec in records_by_domain.values())
+    lines.append(f"**Total Pages Visited**: {total_pages}")
+    lines.append("")
+    
+    return lines
+
+
+def _per_domain_details(records_by_domain: Dict[str, Dict], ordered_domains: Sequence[str]) -> List[str]:
+    out: List[str] = []
+    for domain in ordered_domains:
+        rec = records_by_domain.get(domain)
+        if rec is None:
+            continue
+        out.append("")
+        out.append(f"### {domain}")
+        
+        # New status fields
+        status = rec.get("crawl_status", "UNKNOWN")
+        failure_reason = rec.get("failure_reason")
+        pages_visited = rec.get("pages_visited", 0)
+        
+        out.append("")
+        out.append(f"- **crawl_status**: {status}")
+        out.append(f"- **pages_visited**: {pages_visited}")
+        if failure_reason:
+            out.append(f"- **failure_reason**: {failure_reason}")
+        
+        # Original fields
+        included_urls = rec.get("included_urls") or []
+        if not isinstance(included_urls, list):
+            included_urls = []
+        overflow = bool(rec.get("overflow", False))
+        length = rec.get("length") or {}
+        chars = int((length.get("chars") or 0) if isinstance(length, dict) else 0)
+        toks = int((length.get("approx_tokens") or 0) if isinstance(length, dict) else 0)
+        out.append(f"- **included_urls_count**: {len(included_urls)}")
+        out.append(f"- **overflow**: {overflow}")
+        out.append(f"- **length.chars**: {chars}")
+        out.append(f"- **length.approx_tokens**: {toks}")
+
+        if included_urls:
+            out.append("  - included_urls:")
+            for u in included_urls:
+                out.append(f"    - {u}")
+
+        agg = rec.get("aggregated_context") or ""
+        sample = _content_sample(str(agg))
+        if sample:
+            out.append("  - aggregated_context_sample:")
+            out.append(f"    {sample}")
+    return out
+
+
+def generate_markdown_report(output_jsonl_path: str, input_csv_path: str = None) -> str:
+    """
+    Render a Markdown report from the JSONL domain records and write it next to
+    the JSONL file as `crawl-summary.md`. Returns the path to the written Markdown.
+    
+    Args:
+        output_jsonl_path: Path to the JSONL output file
+        input_csv_path: Optional path to input CSV for domain ordering (if not provided, uses JSONL order)
+    """
+    run_dir = os.path.dirname(os.path.abspath(output_jsonl_path))
+    md_path = os.path.join(run_dir, "crawl-summary.md")
+
+    # Load all records keyed by domain
+    records_by_domain: Dict[str, Dict] = {}
+    try:
+        with open(output_jsonl_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                domain = rec.get("domain")
+                if isinstance(domain, str) and domain:
+                    records_by_domain[domain] = rec
+    except FileNotFoundError:
+        # Nothing to do
+        return md_path
+
+    # Determine domain order - prefer CSV order if available, otherwise use JSONL order
+    ordered_domains: List[str] = []
+    if input_csv_path:
+        try:
+            ordered_domains = load_domains_from_csv(input_csv_path)
+            # Append any extra domains not present in input at the end
+            extras = [d for d in records_by_domain.keys() if d not in ordered_domains]
+            ordered_domains = ordered_domains + extras
+        except Exception:
+            # Fallback to encountered order
+            ordered_domains = list(records_by_domain.keys())
+    else:
+        # No CSV provided, use the order as encountered in JSONL
+        ordered_domains = list(records_by_domain.keys())
+
+    # Build Markdown
+    lines: List[str] = []
+    lines.append("<!--")
+    lines.append("/**")
+    lines.append(" * Purpose: Human-readable summary of crawl results from output.jsonl")
+    lines.append(" * Description: Summarizes crawled domains and aggregated context for quick verification.")
+    lines.append(" * Key Sections: Overview table; Per-domain details")
+    lines.append(" */")
+    lines.append("-->")
+    lines.append("")
+    lines.append(_domain_heading(run_dir))
+    lines.append("")
+    lines.extend(_overview_table(records_by_domain, ordered_domains))
+    lines.extend(_aggregate_stats(records_by_domain)) # Add aggregate stats
+    lines.extend(_per_domain_details(records_by_domain, ordered_domains))
+    content = "\n".join(lines).rstrip() + "\n"
+
+    # Write file atomically
+    tmp = f"{md_path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(content)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, md_path)
+    return md_path
+
+
