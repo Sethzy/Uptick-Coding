@@ -44,7 +44,7 @@ def calculate_numerical_score(classification_result: ClassificationResult) -> Di
         
     Returns:
         Dictionary containing:
-        - final_score: Integer final score (-20 to 100)
+        - final_score: Integer final score (-40 to 100)
         - score_breakdown: Dict with detailed scoring breakdown
     """
     config = get_scoring_config()
@@ -63,7 +63,7 @@ def calculate_numerical_score(classification_result: ClassificationResult) -> Di
     
     base_score = 0
     
-    # 1. Classification Category (30 points max)
+    # 1. Classification Category (50 points max)
     category_value = classification_result.classification_category
     category_score = scoring_rules["classification_category"].get(category_value, 0)
     breakdown["field_scores"]["classification_category"] = {
@@ -73,7 +73,7 @@ def calculate_numerical_score(classification_result: ClassificationResult) -> Di
     }
     base_score += category_score
     
-    # 2. Website Quality (20 points max)
+    # 2. Website Quality (10 points max)
     quality_value = classification_result.website_quality
     quality_score = scoring_rules["website_quality"].get(quality_value, 0)
     breakdown["field_scores"]["website_quality"] = {
@@ -93,7 +93,26 @@ def calculate_numerical_score(classification_result: ClassificationResult) -> Di
     }
     base_score += maintenance_score
     
-    # 4-8. Text fields with binary scoring (10 points each if not N/A)
+    # 4. Full List of Services Offered (10 points max) - Special categorical scoring
+    services_value = getattr(classification_result, "full_list_of_services_offered", "Not Assessed")
+    # The field name in the test data doesn't exactly match the config keys
+    # Let's try to find a match by checking if the value contains the key phrases
+    services_score = 0
+    if "Fire Protection Only" in services_value:
+        services_score = 10
+    elif "Fire Protection and Other Services" in services_value:
+        services_score = 5
+    elif "Other Services Only" in services_value:
+        services_score = -10
+    
+    breakdown["field_scores"]["full_list_of_services_offered"] = {
+        "value": services_value,
+        "points": services_score,
+        "max_points": field_weights["full_list_of_services_offered"]
+    }
+    base_score += services_score
+    
+    # 5-9. Text fields with binary scoring (varies by field: 5-10 points each if not N/A)
     text_fields = [
         "has_certifications_and_compliance_standards",
         "has_multiple_service_territories",
@@ -113,7 +132,7 @@ def calculate_numerical_score(classification_result: ClassificationResult) -> Di
             field_score = field_config["na_value"] if is_na else field_config["not_na_value"]
         else:
             # Fallback scoring for missing config
-            field_score = 0 if is_na else 10
+            field_score = 0 if is_na else field_weights.get(field_name, 10)
         
         breakdown["field_scores"][field_name] = {
             "value": field_value,
@@ -189,21 +208,39 @@ def get_field_score_explanation(field_name: str, field_value: str) -> str:
     
     if field_name == "classification_category":
         score = scoring_rules["classification_category"].get(field_value, 0)
-        return f"'{field_value}' scores {score} points out of 30 possible"
+        max_points = config["field_weights"]["classification_category"]
+        return f"'{field_value}' scores {score} points out of {max_points} possible"
     
     elif field_name == "website_quality":
         score = scoring_rules["website_quality"].get(field_value, 0)
-        return f"'{field_value}' website scores {score} points out of 20 possible"
+        max_points = config["field_weights"]["website_quality"]
+        return f"'{field_value}' website scores {score} points out of {max_points} possible"
     
     elif field_name == "mostly_does_maintenance_and_service":
         score = scoring_rules["mostly_does_maintenance_and_service"].get(field_value, 0)
-        return f"Maintenance focus '{field_value}' scores {score} points out of 10 possible"
+        max_points = config["field_weights"]["mostly_does_maintenance_and_service"]
+        return f"Maintenance focus '{field_value}' scores {score} points out of {max_points} possible"
+    
+    elif field_name == "full_list_of_services_offered":
+        # Use the same logic as the scoring function
+        score = 0
+        if "Fire Protection Only" in field_value:
+            score = 10
+        elif "Fire Protection and Other Services" in field_value:
+            score = 5
+        elif "Other Services Only" in field_value:
+            score = -10
+        
+        max_points = config["field_weights"]["full_list_of_services_offered"]
+        return f"Services '{field_value}' scores {score} points out of {max_points} possible"
     
     elif field_name in scoring_rules.get("text_field_scoring", {}):
         is_na = field_value.upper() == "N/A"
-        score = 0 if is_na else 10
+        field_config = scoring_rules["text_field_scoring"][field_name]
+        score = field_config["na_value"] if is_na else field_config["not_na_value"]
+        max_points = config["field_weights"].get(field_name, 10)
         status = "no information found" if is_na else "information found"
-        return f"{field_name.replace('_', ' ').title()}: {status} - {score} points out of 10 possible"
+        return f"{field_name.replace('_', ' ').title()}: {status} - {score} points out of {max_points} possible"
     
     else:
         return f"Unknown field: {field_name}"
@@ -227,9 +264,9 @@ def validate_scoring_config() -> bool:
         
         # Check that field weights sum to expected total (100 before penalties)
         weights = config["field_weights"]
-        total_weight = sum(weights.values())
+        # Exclude parent_company from total since it has 0 weight (penalty-only)
+        total_weight = sum(value for key, value in weights.items() if key != "has_parent_company")
         
-        # Note: Parent company has 0 weight since it's penalty-only
         if total_weight != 100:
             return False
         

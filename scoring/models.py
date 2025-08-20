@@ -45,6 +45,7 @@ class ClassificationResult(BaseModel):
     has_certifications_and_compliance_standards: str
     has_multiple_service_territories: str
     has_parent_company: str
+    full_list_of_services_offered: str
     using_competitor_software: Optional[str] = "N/A"
     part_of_known_fire_protection_association: Optional[str] = "N/A"
     record_id: Optional[str] = None

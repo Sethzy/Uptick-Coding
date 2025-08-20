@@ -1,17 +1,19 @@
 # Numerical Scoring Configuration
 # This file defines the scoring rules for converting categorical classification results
-# into numerical scores (0-100 point scale with potential -20 penalty)
+# into numerical scores (0-100 point scale with potential -40 penalty)
 
 # Field weights and maximum points
 field_weights:
   classification_category: 50
-  website_quality: 15
+  website_quality: 10
   mostly_does_maintenance_and_service: 10
-  has_certifications_and_compliance_standards: 10
+  has_certifications_and_compliance_standards: 5
   has_multiple_service_territories: 5
   has_parent_company: 0 # Base points (penalty applied separately)
   using_competitor_software: 5
-  part_of_known_fire_protection_association: 10
+  part_of_known_fire_protection_association: 5
+  full_list_of_services_offered: 10
+  # Total: 50+10+10+5+5+0+5+5+10 = 100 points max (before penalties)
 
 # Scoring rules for each field
 scoring_rules:
@@ -20,10 +22,10 @@ scoring_rules:
     "Maintenance & Service Only": 50 # Most valuable - stable recurring revenue
     "50/50 Split": 30 # Diversified revenue streams
     "Install Only": 20 # Project-based, cyclical business
-    "Other": 5 # Specialized expertise, niche market
+    "Other": -10 # Specialized expertise, niche market
     "Not Classifiable": 0 # Unknown business model, high risk
 
-  # Website Quality (15 points max)
+  # Website Quality (10 points max)
   website_quality:
     "High Quality": 10 # Professional operations, strong market presence
     "Average": 5 # Moderate investment, basic digital maturity
@@ -36,9 +38,9 @@ scoring_rules:
 
   # Binary scoring for text fields (10 points each if not N/A)
   text_field_scoring:
-    # Certifications & Compliance Standards (10 points max)
+    # Certifications & Compliance Standards (5 points max)
     has_certifications_and_compliance_standards:
-      not_na_value: 10 # Any certification mentioned
+      not_na_value: 5 # Any certification mentioned
       na_value: 0 # No credentials, quality concerns
 
     # Service Territory Coverage (5 points max)
@@ -51,10 +53,17 @@ scoring_rules:
       not_na_value: 5 # Market awareness, tech adoption
       na_value: 0 # No market awareness, potential isolation
 
-    # Fire Protection Associations (10 points max)
+    # Fire Protection Associations (5 points max)
     part_of_known_fire_protection_association:
-      not_na_value: 10 # Industry engagement
+      not_na_value: 5 # Industry engagement
       na_value: 0 # No industry engagement, isolation
+
+  # Full List of Services Offered (10 points max)
+  full_list_of_services_offered:
+    "Fire Protection Only": 10 # Focused expertise, specialized market
+    "Fire Protection and Other Services": 5 # Diversified but fire-focused
+    "Other Services Only": -10 # Not primarily fire protection, penalty applied
+    # Note: Negative score for "Other Services Only" can result in total scores below 0
 
 # Penalty system
 penalties:
@@ -66,7 +75,7 @@ penalties:
 
 # Score validation
 validation:
-  min_score: -20 # Minimum possible score (with penalty)
+  min_score: -40 # Minimum possible score (with penalties: Other classification -10, services -10, parent company -20)
   max_score: 100 # Maximum possible score
   base_max_score: 100 # Maximum before penalties applied
 
@@ -81,6 +90,7 @@ field_mapping:
   has_certifications_and_compliance_standards: "has_certifications_and_compliance_standards"
   has_multiple_service_territories: "has_multiple_service_territories"
   has_parent_company: "has_parent_company"
+  full_list_of_services_offered: "full_list_of_services_offered"
   # These fields may need to be added to models:
   using_competitor_software: "using_competitor_software"
   part_of_known_fire_protection_association: "part_of_known_fire_protection_association"

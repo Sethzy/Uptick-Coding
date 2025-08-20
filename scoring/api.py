@@ -11,7 +11,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 import httpx
 
@@ -63,27 +63,21 @@ def _build_prompt(aggregated_context: str) -> dict:
         "   - Companies focused exclusively on ongoing upkeep and repair of existing fire protection systems\n"
         "   - Work is primarily scheduled and recurring, based on mandated inspection cycles\n"
         "   - Job tickets: service calls, inspections, testing, preventative maintenance\n"
-        "   - High volume of recurring, small-to-medium-sized tickets and maintenance agreements\n"
         "   - RULE: If website mentions ANY installations, automatically classify as Install Only or 50/50 Split\n"
         "\n"
         "2. INSTALL ONLY:\n"
         "   - Companies engaged in design and installation of new fire protection systems\n"
-        "   - Project-based work in new construction or major renovation projects\n"
-        "   - Job tickets: large, complex projects with multiple phases and significant financial value\n"
-        "   - Focus on blueprints, design, and initial capital expenditure projects\n"
+        "   - Project-based work in new construction or renovation projects\n"
         "   - RULE: If website mentions ANY maintenance or service, automatically classify as Maintenance & Service Only or 50/50 Split\n"
         "\n"
         "3. 50/50 SPLIT:\n"
-        "   - Balanced business model between new installations and ongoing service/maintenance\n"
-        "   - Capacity for large new construction projects AND steady stream of recurring service work\n"
-        "   - Job tickets: mix of large multi-phase install jobs and smaller frequent service calls\n"
+        "   - Balanced business model between new fire protection installations and ongoing fire protection service/maintenance\n"
+        "   - Capacity for installation projects AND steady stream of recurring maintenance and service work\n"
+        "   - Job tickets: mix of install jobs and smaller frequent service calls\n"
         "   - RULE: If website mentions BOTH installations AND maintenance/service, classify here\n"
         "\n"
         "4. OTHER:\n"
-        "   - Specialized fire protection services not fitting other categories\n"
-        "   - Includes: Firestopping, Fireproofing, Kitchen Suppression Systems, Fire Alarms, Portable Extinguishers\n"
-        "   - Highly diverse jobs from small single-item services to complex specialized equipment\n"
-        "   - Not directly related to large-scale water-based suppression systems or general recurring maintenance\n"
+        "   - All services provided are not directly related to fire protection (i.e. marketing company)\n"
         "\n"
         "5. NOT CLASSIFIABLE:\n"
         "   - Use when website data is insufficient or contains no useful business information\n"
@@ -131,6 +125,18 @@ def _build_prompt(aggregated_context: str) -> dict:
         "   Examples: Pye Barker, API Group, Summit Companies, Sciens Building Solutions, Cintas, Guardian Fire Protection, Hiller Fire, Impact Fire, Fortis Fire & Safety, Zeus Fire & Security\n"
         "   Output: Provide a short answer detailing what was found. If nothing was found, output N/A.\n"
         "\n"
+        "6. Full list of services offered:\n"
+        "   Question: What specific services does this company offer?\n"
+        "   Look for: All mentioned services, both fire protection related and other business services\n"
+        "   Output: Always output one of these 3 categories with the specific services listed:\n"
+        "   - Fire Protection Only - [list fire protection services]\n"
+        "   - Fire Protection and Other Services - [list fire protection services], [list other services]\n"
+        "   - Other Services Only - [list other services]\n"
+        "   Examples:\n"
+        "   - Fire Protection Only - Fire alarm system installation, Fire sprinkler maintenance, Emergency lighting\n"
+        "   - Fire and Other Services - Fire alarm installation, HVAC services, Plumbing, Electrical work\n"
+        "   - Other Services Only - HVAC services, Plumbing, Electrical work, General contracting\n"
+        "\n"
         "Schema:\n"
         "{\n"
         "  \"classification_category\": \"Maintenance & Service Only|Install Only|50/50 Split|Other|Not Classifiable\",\n"
@@ -139,7 +145,8 @@ def _build_prompt(aggregated_context: str) -> dict:
         "  \"mostly_does_maintenance_and_service\": \"yes|no\",\n"
         "  \"has_certifications_and_compliance_standards\": \"short answer or N/A\",\n"
         "  \"has_multiple_service_territories\": \"short answer or N/A\",\n"
-        "  \"has_parent_company\": \"short answer or N/A\"\n"
+        "  \"has_parent_company\": \"short answer or N/A\",\n"
+        "  \"full_list_of_services_offered\": \"comprehensive list of services or N/A\"\n"
         "}\n"
         "Rules:\n"
         "- Temperature: 0. Output JSON only.\n"
@@ -202,10 +209,77 @@ def _call_openrouter_sync(client: httpx.Client, cfg: LlmConfig, prompt: dict) ->
     return obj, {"request_ms": elapsed_ms, "token_counts": usage}
 
 
+def _score_keyword_fields(html_keywords_found: List[str]) -> Tuple[str, str]:
+    """
+    Score the two keyword-based fields directly from html_keywords_found.
+    
+    Args:
+        html_keywords_found: List of keywords found during crawling
+        
+    Returns:
+        Tuple of (using_competitor_software, part_of_known_fire_protection_association)
+    """
+    # Initialize with N/A
+    using_competitor_software = "N/A"
+    part_of_known_fire_protection_association = "N/A"
+    
+    if not html_keywords_found:
+        return using_competitor_software, part_of_known_fire_protection_association
+    
+    # Convert to lowercase for case-insensitive matching
+    keywords_lower = [kw.lower() for kw in html_keywords_found]
+    
+    # Check for competitor software keywords
+    competitor_keywords = [
+        "building report", "buildingreports.com", "inspect point", "inspectpoint.com", 
+        "inspectpoint", "buildops", "buildops.com", "service trade", "servicetrade.com"
+    ]
+    
+    found_competitor = None
+    for keyword in competitor_keywords:
+        if keyword in keywords_lower:
+            # Find the original case from html_keywords_found
+            for original_kw in html_keywords_found:
+                if keyword in original_kw.lower():
+                    found_competitor = original_kw
+                    break
+            if found_competitor:
+                break
+    
+    if found_competitor:
+        using_competitor_software = found_competitor
+    elif len([kw for kw in keywords_lower if any(comp in kw for comp in competitor_keywords)]) > 1:
+        using_competitor_software = "Multiple platforms"
+    
+    # Check for fire protection association keywords
+    association_keywords = [
+        "nfpa", "national fire protection association", "nafed", 
+        "national association of fire equipment distributors", "afsa", 
+        "american fire sprinkler association", "nfsa", "national fire sprinkler association",
+        "cfsa", "canadian fire safety association", "casa", 
+        "canadian automatic sprinkler association"
+    ]
+    
+    found_associations = []
+    for keyword in association_keywords:
+        for original_kw in html_keywords_found:
+            if keyword in original_kw.lower():
+                found_associations.append(original_kw)
+                break
+    
+    if len(found_associations) == 1:
+        part_of_known_fire_protection_association = found_associations[0]
+    elif len(found_associations) > 1:
+        part_of_known_fire_protection_association = "Multiple associations"
+    
+    return using_competitor_software, part_of_known_fire_protection_association
+
+
 def score_domain(
     *,
     domain: str,
     aggregated_context: str,
+    html_keywords_found: Optional[List[str]] = None,
     record_id: Optional[str] = None,
     model: str = None,
     timeout_seconds: int = 90,
@@ -226,6 +300,16 @@ def score_domain(
                 obj, _meta = _call_openrouter_sync(client, cfg, prompt)
                 log_info(f"  ✅ Classified as: {obj.get('classification_category', 'Other')}")
                 
+                # Score keyword-based fields directly from html_keywords_found
+                if html_keywords_found:
+                    using_competitor_software, part_of_known_fire_protection_association = _score_keyword_fields(html_keywords_found)
+                    log_info(f"  🔍 Keywords found: {html_keywords_found}")
+                    log_info(f"  💻 Competitor software: {using_competitor_software}")
+                    log_info(f"  🏛️  Fire protection association: {part_of_known_fire_protection_association}")
+                else:
+                    using_competitor_software = "N/A"
+                    part_of_known_fire_protection_association = "N/A"
+                
                 # Create base classification result
                 classification_result = ClassificationResult(
                     domain=domain,
@@ -236,8 +320,9 @@ def score_domain(
                     has_certifications_and_compliance_standards=obj.get("has_certifications_and_compliance_standards", "Not Assessed"),
                     has_multiple_service_territories=obj.get("has_multiple_service_territories", "Not Assessed"),
                     has_parent_company=obj.get("has_parent_company", "Not Assessed"),
-                    using_competitor_software=obj.get("using_competitor_software", "N/A"),
-                    part_of_known_fire_protection_association=obj.get("part_of_known_fire_protection_association", "N/A"),
+                    full_list_of_services_offered=obj.get("full_list_of_services_offered", "Not Assessed"),
+                    using_competitor_software=using_competitor_software,
+                    part_of_known_fire_protection_association=part_of_known_fire_protection_association,
                     record_id=record_id,
                 )
                 
@@ -333,6 +418,7 @@ def score_raw_crawler_file(
             classification_result = score_domain(
                 domain=domain,
                 aggregated_context=aggregated_context,
+                html_keywords_found=record.get("html_keywords_found") if isinstance(record, dict) else getattr(record, "html_keywords_found", None),
                 record_id=record_id,
                 model=model,
                 timeout_seconds=timeout_seconds,
@@ -350,6 +436,7 @@ def score_raw_crawler_file(
                 "has_certifications_and_compliance_standards": classification_result.has_certifications_and_compliance_standards,
                 "has_multiple_service_territories": classification_result.has_multiple_service_territories,
                 "has_parent_company": classification_result.has_parent_company,
+                "full_list_of_services_offered": classification_result.full_list_of_services_offered,
                 "using_competitor_software": classification_result.using_competitor_software,
                 "part_of_known_fire_protection_association": classification_result.part_of_known_fire_protection_association,
                 "final_score": classification_result.final_score,
