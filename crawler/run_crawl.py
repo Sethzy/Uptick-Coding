@@ -28,7 +28,7 @@ from reachability import load_domains_from_csv, load_domain_id_pairs_from_csv
 from session import stable_session_id
 from canonical import canonicalize_domain, is_robot_disallowed
 from politeness import jitter_delay_seconds
-from output_writer import open_jsonl, write_record
+from output_writer import open_jsonl, write_record, write_record_with_status
 from report_md import generate_markdown_report
 from extraction import make_page_record
 from link_selection import (
@@ -263,7 +263,7 @@ def main() -> int:
                             "overflow": False,
                             "length": {"chars": 0, "approx_tokens": 0},
                         }
-                        write_record(agg_fh, agg_rec)
+                        write_record_with_status(agg_fh, agg_rec, "FAIL", reason, 0)
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
@@ -296,7 +296,7 @@ def main() -> int:
                             "overflow": False,
                             "length": {"chars": 0, "approx_tokens": 0},
                         }
-                        write_record(agg_fh, agg_rec)
+                        write_record_with_status(agg_fh, agg_rec, "SKIPPED", reason, 0)
                         retry += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "SKIPPED", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
@@ -364,7 +364,7 @@ def main() -> int:
                             "overflow": False,
                             "length": {"chars": 0, "approx_tokens": 0},
                         }
-                        write_record(agg_fh, agg_rec)
+                        write_record_with_status(agg_fh, agg_rec, "FAIL", reason, 0)
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=0)
@@ -562,7 +562,7 @@ def main() -> int:
                             "overflow": False,
                             "length": {"chars": 0, "approx_tokens": 0},
                         }
-                        write_record(agg_fh, agg_rec)
+                        write_record_with_status(agg_fh, agg_rec, "FAIL", reason, len(pages))
                         fail += 1
                         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                         log_progress(logger, domain, "FAIL", reason=reason, elapsed_ms=int((time.time()-start_ms)*1000), pages_visited=len(pages))
@@ -591,7 +591,7 @@ def main() -> int:
                     agg_rec = _build_aggregated_record(domain, pages, max_tokens=max_tokens_cfg, max_chars=max_chars_cfg)
                     # Attach record_id to aggregated output
                     agg_rec["record_id"] = record_id
-                    write_record(agg_fh, agg_rec)
+                    write_record_with_status(agg_fh, agg_rec, "SUCCESS", None, len(pages))
                     ok += 1
                     elapsed_ms = int((time.time() - start_ms) * 1000)
                     log_progress(logger, domain, "OK", elapsed_ms=elapsed_ms, pages_visited=len(pages))

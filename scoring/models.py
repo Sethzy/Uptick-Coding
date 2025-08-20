@@ -18,6 +18,24 @@ class Evidence(BaseModel):
     snippet: str
 
 
+class CrawlerRecord(BaseModel):
+    """Model for raw crawler output with enhanced logging fields."""
+    domain: str
+    aggregated_context: str
+    included_urls: List[str]
+    html_keywords_found: Optional[List[str]] = []
+    length: Dict[str, Any]
+    record_id: str
+    
+    # Enhanced crawler logging fields
+    crawl_status: Optional[str] = None
+    failure_reason: Optional[str] = None
+    pages_visited: Optional[int] = None
+    
+    # Optional overflow field sometimes present in crawler output
+    overflow: Optional[bool] = None
+
+
 class ClassificationResult(BaseModel):
     domain: str
     classification_category: str
@@ -38,6 +56,11 @@ class LabeledDatasetRecord(BaseModel):
     html_keywords_found: List[str]
     length: Dict[str, Any]
     record_id: str
+    
+    # Enhanced crawler logging fields
+    crawl_status: Optional[str] = None
+    failure_reason: Optional[str] = None
+    pages_visited: Optional[int] = None
     
     # All enriched HubSpot CSV fields
     company_name: str = Field(alias="Company name")
@@ -95,6 +118,11 @@ class LabeledDatasetResult(BaseModel):
     html_keywords_found: List[str]
     length: Dict[str, Any]
     record_id: str
+    
+    # Enhanced crawler logging fields
+    crawl_status: Optional[str] = None
+    failure_reason: Optional[str] = None
+    pages_visited: Optional[int] = None
     
     # All enriched HubSpot CSV fields
     company_name: str = Field(alias="Company name")

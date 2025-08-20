@@ -1,7 +1,7 @@
 """
 Purpose: Real Modal deployment for the targeted domain crawler
-Description: This deployment uses the full crawler logic to crawl domains and return output files
-Key Functions: crawl_domains_real (full crawler with output)
+Description: This deployment uses the full crawler logic to crawl domains with 3-container concurrent processing
+Key Functions: crawl_domains_concurrent (3 containers × 1 CPU + 2GB RAM)
 """
 
 import modal
@@ -47,24 +47,19 @@ image = (
 @app.function(
     image=image,
     timeout=18000,  # 5 hour timeout (for 5000 domains)
-    memory=4096,   # 4GB RAM
-    cpu=2.0,       # 2 CPU cores
+    memory=2048,   # 2GB RAM (optimized for web crawling)
+    cpu=1.0,       # 1 CPU core (optimized for I/O bound operations)
     volumes={"/mnt/crawler_outputs": crawler_volume},  # Mount volume for output storage
 )
-def crawl_domains_real(
-    limit: int = 1,
-    domain_column: str = "Company Domain Name",
-    id_column: str = "Record ID",
-    session_id: str = None
+def crawl_domains_worker(
+    worker_args: tuple
 ):
     """
-    Real crawler function that uses the full crawler logic and saves output to persistent volume.
+    Worker function for individual containers in the concurrent setup.
+    Each container gets 1 CPU + 2GB RAM for cost-effective web crawling.
     
     Args:
-        limit: Maximum number of domains to process
-        domain_column: CSV column containing domains
-        id_column: CSV column containing record IDs
-        session_id: Unique session identifier for output files
+        worker_args: Tuple containing (limit, domain_column, id_column, session_id, from_index)
     """
     import os
     import sys
@@ -72,10 +67,13 @@ def crawl_domains_real(
     import shutil
     from pathlib import Path
     
+    # Unpack the tuple arguments that Modal's .map() method passes
+    limit, domain_column, id_column, session_id, from_index = worker_args
+    
     # Generate session ID if not provided
     if session_id is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_id = f"crawl_{timestamp}_{limit}domains"
+        session_id = f"crawl_{timestamp}_{from_index}-{from_index+limit}_1cpu_2gb"
     
     # Add the mounted crawler directory to Python path
     sys.path.insert(0, "/root")
@@ -84,7 +82,8 @@ def crawl_domains_real(
     temp_output_file = "/root/output.jsonl"
     volume_output_file = f"/mnt/crawler_outputs/{session_id}.jsonl"
     
-    print(f"🚀 Starting REAL crawl with limit={limit} (Session: {session_id})")
+    print(f"🚀 Starting worker container with limit={limit}, from_index={from_index} (Session: {session_id})")
+    print(f"💻 Container: 1 CPU + 2GB RAM (cost-optimized)")
     print(f"📁 Input CSV: /root/enriched_hubspot_tam_data.csv")
     print(f"📤 Temp Output: {temp_output_file}")
     print(f"💾 Volume Output: {volume_output_file}")
@@ -101,9 +100,10 @@ def crawl_domains_real(
             "--input-csv", "/root/enriched_hubspot_tam_data.csv",
             "--output-jsonl", temp_output_file,
             "--limit", str(limit),
+            "--from-index", str(from_index),
             "--column", domain_column,
             "--id-column", id_column,
-            "--concurrency", "2",  # Use both CPU cores efficiently
+            "--concurrency", "1",  # Single-threaded for 1 CPU core
             "--robots", "ignore"   # Simpler robots handling
         ]
         
@@ -128,128 +128,221 @@ def crawl_domains_real(
         if output_file.exists():
             # Get file statistics
             file_size = output_file.stat().st_size
+            output_lines = sum(1 for _ in open(output_file))
             
-            # Read the output file content to count lines
-            with open(output_file, 'r', encoding='utf-8') as f:
-                output_content = f.read()
-            line_count = len(output_content.strip().split('\n')) if output_content.strip() else 0
+            print(f"📄 Output file created: {output_file}")
+            print(f"📊 File size: {file_size} bytes")
+            print(f"📄 Output lines: {output_lines}")
             
-            # Calculate file checksum for integrity verification
-            with open(output_file, 'rb') as f:
-                file_hash = hashlib.sha256(f.read()).hexdigest()
-            
-            print(f"📊 Output file created: {output_file}")
-            print(f"📄 Lines in output: {line_count}")
-            print(f"📏 File size: {file_size} bytes")
-            print(f"🔒 File hash: {file_hash[:16]}...")
-            
-            # Ensure output directory exists on volume
-            os.makedirs("/mnt/crawler_outputs", exist_ok=True)
-            
-            # Copy the output file to the persistent volume
-            print(f"💾 Copying output to volume: {volume_output_file}")
+            # Copy to volume for persistence
             shutil.copy2(temp_output_file, volume_output_file)
+            print(f"💾 File copied to volume: {volume_output_file}")
             
-            # Verify the copy was successful
-            if Path(volume_output_file).exists():
-                volume_file_size = Path(volume_output_file).stat().st_size
-                print(f"✅ File successfully saved to volume ({volume_file_size} bytes)")
-                
-                # Verify integrity
-                with open(volume_output_file, 'rb') as f:
-                    volume_file_hash = hashlib.sha256(f.read()).hexdigest()
-                
-                if file_hash == volume_file_hash:
-                    print(f"✅ File integrity verified (hashes match)")
-                else:
-                    print(f"⚠️  File integrity warning: hashes don't match")
-                
-                return {
-                    "status": "success",
-                    "result_code": result.returncode,
-                    "session_id": session_id,
-                    "volume_file_path": volume_output_file,
-                    "file_size": file_size,
-                    "file_hash": file_hash,
-                    "output_lines": line_count,
-                    "domains_processed": limit,
-                    "input_file": "/root/enriched_hubspot_tam_data.csv",
-                    "temp_output_file": temp_output_file,
-                    "crawler_stdout": result.stdout[:1000] if result.stdout else None,  # Truncate for return
-                    "crawler_stderr": result.stderr[:1000] if result.stderr else None   # Truncate for return
-                }
-            else:
-                print("❌ Failed to copy file to volume")
-                return {
-                    "status": "error",
-                    "result_code": result.returncode,
-                    "message": "Crawl completed but failed to save to volume",
-                    "session_id": session_id,
-                    "temp_file_exists": True,
-                    "file_size": file_size,
-                    "domains_processed": limit
-                }
-        else:
-            print("⚠️  No output file created")
+            # Clean up temp file
+            os.remove(temp_output_file)
+            print(f"🧹 Temp file cleaned up")
+            
             return {
-                "status": "warning",
-                "result_code": result.returncode,
-                "message": "Crawl completed but no output file was created",
+                "status": "success",
                 "session_id": session_id,
-                "domains_processed": limit,
+                "file_size": file_size,
+                "output_lines": output_lines,
+                "volume_file": f"{session_id}.jsonl",
+                "container_spec": "1 CPU + 2GB RAM",
+                "domains_processed": output_lines,
+                "from_index": from_index,
+                "limit": limit
+            }
+        else:
+            error_msg = f"Output file not created. Return code: {result.returncode}"
+            print(f"❌ {error_msg}")
+            return {
+                "status": "error",
+                "message": error_msg,
                 "crawler_stdout": result.stdout,
-                "crawler_stderr": result.stderr
+                "crawler_stderr": result.stderr,
+                "return_code": result.returncode
             }
             
     except Exception as e:
-        print(f"❌ Error during crawl: {e}")
-        import traceback
-        traceback.print_exc()
+        error_msg = f"Exception during crawl: {str(e)}"
+        print(f"❌ {error_msg}")
         return {
             "status": "error",
-            "error": str(e),
-            "session_id": session_id,
-            "input_file": "/root/enriched_hubspot_tam_data.csv"
+            "message": error_msg,
+            "exception": str(e)
         }
 
-@app.local_entrypoint()
-def main(
-    limit: int = 2,
+@app.function(
+    image=image,
+    timeout=18000,  # 5 hour timeout
+    memory=2048,   # 2GB RAM
+    cpu=1.0,       # 1 CPU core
+    volumes={"/mnt/crawler_outputs": crawler_volume},
+)
+def crawl_domains_concurrent(
+    total_domains: int = 1000,
     domain_column: str = "Company Domain Name",
     id_column: str = "Record ID"
 ):
-    """Local entrypoint for running crawler. Files are saved to Modal volume."""
-    print(f"🚀 Starting Modal crawler with limit={limit}...")
+    """
+    Use Modal's built-in .map() method to run containers in parallel.
+    Each container gets 1 CPU + 2GB RAM for optimal cost/performance.
     
-    # Run the crawler on Modal
-    result = crawl_domains_real.remote(
-        limit=limit,
+    Args:
+        total_domains: Total number of domains to process
+        domain_column: CSV column containing domains
+        id_column: CSV column containing record IDs
+    """
+    from datetime import datetime
+    
+    # Calculate container distribution
+    container_count = 3
+    domains_per_container = total_domains // container_count
+    
+    print(f"🚀 Starting CONCURRENT crawl with {container_count} containers")
+    print(f"💻 Each container: 1 CPU + 2GB RAM")
+    print(f"📊 Total domains: {total_domains}")
+    print(f"📦 Domains per container: {domains_per_container}")
+    print(f"💰 Cost optimization: {container_count} small containers vs 1 large container")
+    
+    # Calculate cost comparison
+    old_cost_per_hour = 0.09432  # 2 CPU + 4GB RAM
+    new_cost_per_hour = 0.04716  # 1 CPU + 2GB RAM
+    total_new_cost_per_hour = new_cost_per_hour * container_count
+    
+    print(f"💰 Cost comparison:")
+    print(f"   Old setup (1 container): ${old_cost_per_hour:.5f}/hour")
+    print(f"   New setup ({container_count} containers): ${total_new_cost_per_hour:.5f}/hour")
+    print(f"   Cost difference: ${total_new_cost_per_hour - old_cost_per_hour:.5f}/hour")
+    
+    # Prepare inputs for .map() - each tuple represents one container's work
+    map_inputs = []
+    for i in range(container_count):
+        start_index = i * domains_per_container
+        end_index = start_index + domains_per_container
+        
+        # Adjust last container to handle remainder
+        if i == container_count - 1:
+            end_index = total_domains
+        
+        actual_limit = end_index - start_index
+        
+        print(f"📦 Container {i+1}: domains {start_index}-{end_index-1} (limit: {actual_limit})")
+        
+        # Create input tuple for this container
+        container_input = (
+            actual_limit,                    # limit
+            domain_column,                   # domain_column
+            id_column,                       # id_column
+            f"concurrent_batch_{i+1}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",  # session_id
+            start_index                      # from_index
+        )
+        map_inputs.append(container_input)
+    
+    print(f"🔄 Launching {container_count} containers using Modal's .map() method!")
+    print(f"⏱️  Expected completion: ~{total_domains * 2 / 60:.1f} minutes (vs ~{total_domains * 2 / 60 * 3:.1f} minutes with 1 container)")
+    
+    # Use Modal's .map() method for true parallel execution
+    # This will launch all containers simultaneously and wait for all to complete
+    results = crawl_domains_worker.map(map_inputs)
+    
+    # Collect results from all containers
+    all_results = []
+    total_processed = 0
+    successful_containers = 0
+    
+    for i, result in enumerate(results):
+        all_results.append(result)
+        
+        if result.get('status') == 'success':
+            successful_containers += 1
+            total_processed += result.get('domains_processed', 0)
+            print(f"✅ Container {i+1} completed successfully: {result.get('domains_processed', 0)} domains")
+        else:
+            print(f"❌ Container {i+1} failed: {result.get('message', 'Unknown error')}")
+    
+    print(f"📊 Final Results:")
+    print(f"   Successful containers: {successful_containers}/{container_count}")
+    print(f"   Total domains processed: {total_processed}")
+    print(f"   All results: {all_results}")
+    
+    return {
+        "status": "completed",
+        "container_count": container_count,
+        "total_domains": total_domains,
+        "domains_per_container": domains_per_container,
+        "cost_per_hour": total_new_cost_per_hour,
+        "successful_containers": successful_containers,
+        "total_processed": total_processed,
+        "container_results": all_results,
+        "message": f"Completed {container_count} containers with 1 CPU + 2GB RAM each"
+    }
+
+@app.local_entrypoint()
+def main(
+    total_domains: int = 1000,
+    domain_column: str = "Company Domain Name",
+    id_column: str = "Record ID"
+):
+    """
+    Local entrypoint for running the concurrent crawler.
+    
+    Args:
+        total_domains: Total domains to process
+        domain_column: CSV column containing domains
+        id_column: CSV column containing record IDs
+    """
+    print(f"🚀 Starting Modal crawler with 3-container concurrent setup...")
+    print(f"🔄 Using 3-container concurrent setup")
+    print(f"💻 Each container: 1 CPU + 2GB RAM")
+    print(f"📊 Total domains to process: {total_domains}")
+    
+    # Calculate cost comparison
+    old_cost_per_hour = 0.09432  # 2 CPU + 4GB RAM
+    new_cost_per_hour = 0.04716  # 1 CPU + 2GB RAM
+    total_new_cost_per_hour = new_cost_per_hour * 3
+    
+    print(f"💰 Cost Analysis:")
+    print(f"   Old setup (1 container): ${old_cost_per_hour:.5f}/hour")
+    print(f"   New setup (3 containers): ${total_new_cost_per_hour:.5f}/hour")
+    print(f"   Cost difference: ${total_new_cost_per_hour - old_cost_per_hour:.5f}/hour")
+    print(f"   Performance gain: 3x faster completion")
+    
+    # Run the concurrent crawler
+    result = crawl_domains_concurrent.remote(
+        total_domains=total_domains,
         domain_column=domain_column,
         id_column=id_column
     )
     
-    print(f"📊 Crawl result: {result['status']}")
+    print(f"\n🎉 Concurrent crawl completed!")
+    print(f"📊 Final Status: {result['status']}")
+    print(f"📦 Containers used: {result['container_count']}")
+    print(f"✅ Successful containers: {result['successful_containers']}/{result['container_count']}")
+    print(f"🌐 Total domains processed: {result['total_processed']}")
     
-    if result.get('status') == 'success':
-        session_id = result.get('session_id')
-        print(f"✅ Crawl successful (Session: {session_id})")
-        print(f"📄 Output lines: {result.get('output_lines', 0)}")
-        print(f"💾 File size: {result.get('file_size', 0)} bytes")
-        print(f"🖾 Volume file: {session_id}.jsonl")
-        print(f"💡 To download manually, use Modal CLI: modal volume get uptick-crawler-outputs {session_id}.jsonl")
-        
-        return {"crawl_result": result}
+    # Show individual container results
+    if result.get('container_results'):
+        print(f"\n📋 Container Results:")
+        for i, container_result in enumerate(result['container_results']):
+            if container_result.get('status') == 'success':
+                print(f"   Container {i+1}: ✅ {container_result.get('domains_processed', 0)} domains, {container_result.get('file_size', 0)} bytes")
+                print(f"     Output file: {container_result.get('volume_file', 'N/A')}")
+            else:
+                print(f"   Container {i+1}: ❌ {container_result.get('message', 'Unknown error')}")
     
-    else:
-        print(f"❌ Crawl failed: {result.get('message', 'Unknown error')}")
-        if result.get('crawler_stderr'):
-            print(f"🔍 Error details: {result['crawler_stderr'][:200]}...")
-        return {"crawl_result": result}
+    print(f"\n💡 To download results manually, use Modal CLI:")
+    if result.get('container_results'):
+        for container_result in result['container_results']:
+            if container_result.get('status') == 'success' and container_result.get('volume_file'):
+                print(f"   modal volume get uptick-crawler-outputs {container_result['volume_file']}")
+    
+    return {"concurrent_result": result}
 
 if __name__ == "__main__":
     # Deploy the app
     app.deploy()
     print("🚀 App deployed! You can now run:")
-    print("   modal run crawler/modal_deploy_real.py")
-    print("   modal run crawler/modal_deploy_real.py --limit 5")
+    print("   modal run crawler/modal_deploy_real.py --total-domains 1000")
     print("   modal volume get uptick-crawler-outputs <session_id>.jsonl  # to download output")

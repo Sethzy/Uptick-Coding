@@ -15,10 +15,10 @@ from typing import Iterable, List, Optional
 
 import httpx
 
-from .models import ClassificationResult, LabeledDatasetRecord, LabeledDatasetResult
+from .models import ClassificationResult, LabeledDatasetRecord, LabeledDatasetResult, CrawlerRecord
 from .config import get_openrouter_api_key, get_openrouter_endpoint, get_default_model
-from .io_jsonl import iter_labeled_dataset_from_jsonl, write_labeled_results_jsonl
-from .logging import log_info, log_error
+from .io_jsonl import iter_labeled_dataset_from_jsonl, write_labeled_results_jsonl, iter_crawler_records_from_jsonl
+from .scoring_logging import log_info, log_error
 
 
 # AIDEV-NOTE: Minimal schema to satisfy simplified PRD v1.
@@ -88,7 +88,6 @@ def _build_prompt(aggregated_context: str) -> dict:
         "   - Use when website data is insufficient or contains no useful business information\n"
         "   - Cases include: blank/empty aggregated context, website scrape failures\n"
         "   - Websites showing 'Coming Soon', 'Under Construction', or placeholder content\n"
-        "   - Content that doesn't mention fire protection services, business activities, or company focus\n"
         "   - RULE: Classify here if aggregated_context is empty, very short (<50 chars), or contains no business-relevant information\n"
         "\n"
         "Market Fit Assessment:\n"
@@ -276,6 +275,11 @@ def score_enriched_hubspot_domain(
         length=record.length,
         record_id=record.record_id,
         
+        # Enhanced crawler logging fields
+        crawl_status=record.crawl_status,
+        failure_reason=record.failure_reason,
+        pages_visited=record.pages_visited,
+        
         # All enriched HubSpot CSV fields
         company_name=record.company_name,
         na_state=record.na_state,
@@ -364,6 +368,86 @@ def score_enriched_hubspot_file(
     if output_jsonl:
         log_info(f"Writing enriched results to: {output_jsonl}")
         write_labeled_results_jsonl(output_jsonl, results)
+
+    return results
+
+
+def score_raw_crawler_file(
+    *,
+    input_jsonl: str,
+    output_jsonl: Optional[str] = None,
+    model: str = None,
+    timeout_seconds: int = 90,
+) -> List[dict]:
+    """
+    Score raw crawler records (for demonstration/testing purposes).
+    
+    This function shows that the enhanced logging fields are preserved
+    throughout the scoring process, even though they're not used in 
+    classification.
+    """
+    records = list(iter_crawler_records_from_jsonl(input_jsonl))
+    
+    log_info(f"Starting classification of {len(records)} raw crawler records using model: {model}")
+    log_info(f"Output: JSONL={output_jsonl or 'none'}")
+    log_info("🔒 Only 'aggregated_context' field will be used for classification")
+    log_info("📊 All crawler fields (html_keywords_found, included_urls, length, overflow, etc.) will be preserved")
+
+    results: List[dict] = []
+    for i, record in enumerate(records, 1):
+        log_info(f"\n[{i}/{len(records)}] Processing domain: {record.domain}")
+        log_info(f"   🎯 Status: {record.crawl_status}, Pages: {record.pages_visited}, Reason: {record.failure_reason}")
+        
+        try:
+            classification_result = score_domain(
+                domain=record.domain,
+                aggregated_context=record.aggregated_context,
+                record_id=record.record_id,
+                model=model,
+                timeout_seconds=timeout_seconds,
+            )
+            
+            # Create result with all original fields plus classification
+            result = {
+                # Original crawler fields
+                "domain": record.domain,
+                "aggregated_context": record.aggregated_context,
+                "included_urls": record.included_urls,
+                "html_keywords_found": record.html_keywords_found,
+                "length": record.length,
+                "record_id": record.record_id,
+                
+                # Enhanced crawler logging fields (preserved!)
+                "crawl_status": record.crawl_status,
+                "failure_reason": record.failure_reason,
+                "pages_visited": record.pages_visited,
+                "overflow": record.overflow,
+                
+                # Classification results
+                "classification_category": classification_result.classification_category,
+                "rationale": classification_result.rationale,
+                "website_quality": classification_result.website_quality,
+                "mostly_does_maintenance_and_service": classification_result.mostly_does_maintenance_and_service,
+                "has_certifications_and_compliance_standards": classification_result.has_certifications_and_compliance_standards,
+                "has_multiple_service_territories": classification_result.has_multiple_service_territories,
+                "has_parent_company": classification_result.has_parent_company,
+            }
+            results.append(result)
+            
+        except Exception as e:
+            log_error(f"Failed to process {record.domain}: {e}")
+            # Continue with next record instead of failing completely
+            continue
+
+    log_info(f"\n✅ Completed {len(results)}/{len(records)} records successfully")
+    log_info("🎯 All crawler fields preserved through scoring process")
+    
+    if output_jsonl:
+        log_info(f"Writing results to: {output_jsonl}")
+        with open(output_jsonl, "w", encoding="utf-8") as f:
+            for result in results:
+                f.write(json.dumps(result, ensure_ascii=False))
+                f.write("\n")
 
     return results
 

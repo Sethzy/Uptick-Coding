@@ -14,9 +14,9 @@ from typing import Optional
 
 import click
 
-from .api import score_enriched_hubspot_file
+from .api import score_enriched_hubspot_file, score_raw_crawler_file
 from .config import get_openrouter_api_key
-from .logging import log_info
+from .scoring_logging import log_info
 
 
 @click.group()
@@ -80,6 +80,43 @@ def score(input_file: str, output: Optional[str], model: str, hubspot_csv: Optio
         )
         click.echo(f"✅ Success! Processed {len(results)} domains")
         click.echo(f"📊 Results saved to: {output}")
+    except Exception as e:
+        click.echo(f"❌ Error during scoring: {e}")
+        sys.exit(1)
+
+
+@quick_start.command()
+@click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
+@click.option("--output", "-o", help="Output file path (auto-generated if not specified)")
+@click.option("--model", "-m", default="qwen/qwen3-30b-a3b", help="LLM model to use")
+def score_crawler(input_file: str, output: Optional[str], model: str) -> None:
+    """Quick score raw crawler data, preserving all crawler fields including html_keywords_found."""
+    if not get_openrouter_api_key():
+        click.echo("❌ Error: OpenRouter API key not found!")
+        click.echo("   Set OPENROUTER_API_KEY environment variable or create a .env file")
+        sys.exit(1)
+    
+    # Auto-generate output filename if not provided
+    if not output:
+        input_path = Path(input_file)
+        output = str(input_path.parent / f"{input_path.stem}_scored{input_path.suffix}")
+    
+    click.echo(f"🚀 Starting raw crawler scoring...")
+    click.echo(f"📁 Input: {input_file}")
+    click.echo(f"📤 Output: {output}")
+    click.echo(f"🤖 Model: {model}")
+    click.echo("📊 All crawler fields (html_keywords_found, included_urls, length, etc.) will be preserved")
+    
+    try:
+        results = score_raw_crawler_file(
+            input_jsonl=input_file,
+            output_jsonl=output,
+            model=model,
+            timeout_seconds=90
+        )
+        click.echo(f"✅ Success! Processed {len(results)} domains")
+        click.echo(f"📊 Results saved to: {output}")
+        click.echo("🎯 All crawler fields preserved with classification results")
     except Exception as e:
         click.echo(f"❌ Error during scoring: {e}")
         sys.exit(1)

@@ -43,8 +43,8 @@ def _overview_table(records_by_domain: Dict[str, Dict], ordered_domains: Sequenc
     lines: List[str] = []
     lines.append("### Overview")
     lines.append("")
-    lines.append("| Domain | Included URLs | Overflow | Length (chars) | Approx tokens |")
-    lines.append("| --- | ---: | --- | ---: | ---: |")
+    lines.append("| Domain | Status | Pages Visited | Included URLs | Overflow | Length (chars) | Approx tokens |")
+    lines.append("| --- | --- | ---: | ---: | --- | ---: | ---: |")
     for domain in ordered_domains:
         rec = records_by_domain.get(domain)
         if rec is None:
@@ -56,8 +56,58 @@ def _overview_table(records_by_domain: Dict[str, Dict], ordered_domains: Sequenc
         length = rec.get("length") or {}
         chars = int((length.get("chars") or 0) if isinstance(length, dict) else 0)
         toks = int((length.get("approx_tokens") or 0) if isinstance(length, dict) else 0)
-        lines.append(f"| {domain} | {len(included_urls)} | {overflow} | {chars} | {toks} |")
+        
+        # New fields
+        status = rec.get("crawl_status", "UNKNOWN")
+        pages_visited = rec.get("pages_visited", 0)
+        
+        lines.append(f"| {domain} | {status} | {pages_visited} | {len(included_urls)} | {overflow} | {chars} | {toks} |")
     lines.append("")
+    return lines
+
+
+def _aggregate_stats(records_by_domain: Dict[str, Dict]) -> List[str]:
+    """Generate aggregate statistics for crawl status and failure reasons."""
+    lines: List[str] = []
+    lines.append("### Aggregate Statistics")
+    lines.append("")
+    
+    # Count by status
+    status_counts = {}
+    failure_reason_counts = {}
+    total_domains = len(records_by_domain)
+    
+    for rec in records_by_domain.values():
+        status = rec.get("crawl_status", "UNKNOWN")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        
+        # Count failure reasons
+        if status == "FAIL":
+            failure_reason = rec.get("failure_reason") or "UNKNOWN"
+            failure_reason_counts[failure_reason] = failure_reason_counts.get(failure_reason, 0) + 1
+    
+    # Status summary
+    lines.append("#### Crawl Status Summary")
+    lines.append("")
+    for status, count in sorted(status_counts.items()):
+        percentage = (count / total_domains) * 100 if total_domains > 0 else 0
+        lines.append(f"- **{status}**: {count} domains ({percentage:.1f}%)")
+    
+    lines.append("")
+    
+    # Failure reasons breakdown
+    if failure_reason_counts:
+        lines.append("#### Failure Reasons Breakdown")
+        lines.append("")
+        for reason, count in sorted(failure_reason_counts.items()):
+            lines.append(f"- **{reason}**: {count} domains")
+        lines.append("")
+    
+    # Total pages visited
+    total_pages = sum(rec.get("pages_visited", 0) for rec in records_by_domain.values())
+    lines.append(f"**Total Pages Visited**: {total_pages}")
+    lines.append("")
+    
     return lines
 
 
@@ -69,6 +119,19 @@ def _per_domain_details(records_by_domain: Dict[str, Dict], ordered_domains: Seq
             continue
         out.append("")
         out.append(f"### {domain}")
+        
+        # New status fields
+        status = rec.get("crawl_status", "UNKNOWN")
+        failure_reason = rec.get("failure_reason")
+        pages_visited = rec.get("pages_visited", 0)
+        
+        out.append("")
+        out.append(f"- **crawl_status**: {status}")
+        out.append(f"- **pages_visited**: {pages_visited}")
+        if failure_reason:
+            out.append(f"- **failure_reason**: {failure_reason}")
+        
+        # Original fields
         included_urls = rec.get("included_urls") or []
         if not isinstance(included_urls, list):
             included_urls = []
@@ -76,7 +139,6 @@ def _per_domain_details(records_by_domain: Dict[str, Dict], ordered_domains: Seq
         length = rec.get("length") or {}
         chars = int((length.get("chars") or 0) if isinstance(length, dict) else 0)
         toks = int((length.get("approx_tokens") or 0) if isinstance(length, dict) else 0)
-        out.append("")
         out.append(f"- **included_urls_count**: {len(included_urls)}")
         out.append(f"- **overflow**: {overflow}")
         out.append(f"- **length.chars**: {chars}")
@@ -154,6 +216,7 @@ def generate_markdown_report(output_jsonl_path: str, input_csv_path: str = None)
     lines.append(_domain_heading(run_dir))
     lines.append("")
     lines.extend(_overview_table(records_by_domain, ordered_domains))
+    lines.extend(_aggregate_stats(records_by_domain)) # Add aggregate stats
     lines.extend(_per_domain_details(records_by_domain, ordered_domains))
     content = "\n".join(lines).rstrip() + "\n"
 

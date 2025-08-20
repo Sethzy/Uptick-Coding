@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Iterable
 
-from .models import LabeledDatasetRecord, LabeledDatasetResult
+from .models import LabeledDatasetRecord, LabeledDatasetResult, CrawlerRecord
 
 
 def iter_labeled_dataset_from_jsonl(path: str) -> Iterable[LabeledDatasetRecord]:
@@ -21,6 +21,17 @@ def iter_labeled_dataset_from_jsonl(path: str) -> Iterable[LabeledDatasetRecord]
                 continue
             obj = json.loads(line)
             yield LabeledDatasetRecord.model_validate(obj)
+
+
+def iter_crawler_records_from_jsonl(path: str) -> Iterable[CrawlerRecord]:
+    """Read raw crawler records from JSONL file."""
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            yield CrawlerRecord.model_validate(obj)
 
 
 def write_labeled_results_jsonl(path: str, results: Iterable[LabeledDatasetResult]) -> None:
