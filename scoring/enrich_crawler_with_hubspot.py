@@ -80,6 +80,7 @@ def enrich_crawler_record(crawler_record: Dict, hubspot_data: Dict[str, Dict[str
             "Results Returned Count": "",
             "Serper Link": "",
             "Enrich Company": "",
+            "Official Linkedin Url": "",
             "Founded": "",
             "Employee Count": "",
             "Website": f"https://{domain}",

@@ -24,10 +24,10 @@ Crawler Data (JSONL) → Enrich with HubSpot CSV → Score → Results
 
 ```bash
 # From the scoring/ directory
-./quick_score.sh enrich ../crawl_data.jsonl ../uptick-csvs/enriched-hubspot-TAM-08-25.csv
+./quick_score.sh enrich ../crawl_data.jsonl ../uptick-csvs/enriched-hutbpot-tam-v2.csv
 
 # Or using Python directly
-python3 -m scoring.quick_start enrich ../crawl_data.jsonl ../uptick-csvs/enriched-hubspot-TAM-08-25.csv
+python3 -m scoring.quick_start enrich ../crawl_data.jsonl ../uptick-csvs/enriched-hutbpot-tam-v2.csv
 ```
 
 ### 2. Check Setup
@@ -52,7 +52,7 @@ The `score` command now automatically detects whether you're using raw crawler d
 ./quick_score.sh score crawl_data.jsonl
 
 # Score with automatic enrichment in one step
-./quick_score.sh score crawl_data.jsonl results.jsonl qwen/qwen3-30b-a3b ../uptick-csvs/enriched-hubspot-TAM-08-25.csv
+./quick_score.sh score crawl_data.jsonl results.jsonl qwen/qwen3-30b-a3b ../uptick-csvs/enriched-hutbpot-tam-v2.csv
 
 # Specify output file
 ./quick_score.sh score data.jsonl output_scored.jsonl
@@ -104,13 +104,13 @@ cd /path/to/Uptick-Coding
 
 # Step 1: Enrich crawler data with HubSpot CSV (ALWAYS DO THIS FIRST!)
 cd scoring
-./quick_score.sh enrich ../crawl_data.jsonl ../uptick-csvs/enriched-hubspot-TAM-08-25.csv
+./quick_score.sh enrich ../crawl_data.jsonl ../uptick-csvs/enriched-hutbpot-tam-v2.csv
 
 # Step 2: Score the enriched data (uses CUSTOM_MODEL from .env)
 ./quick_score.sh score ../crawl_data_enriched.jsonl
 
 # Or do both in one step (enrich + score)
-./quick_score.sh score ../crawl_data.jsonl ../results.jsonl ../uptick-csvs/enriched-hubspot-TAM-08-25.csv
+./quick_score.sh score ../crawl_data.jsonl ../results.jsonl ../uptick-csvs/enriched-hutbpot-tam-v2.csv
 ```
 
 ### Quick Test Run
