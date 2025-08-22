@@ -35,6 +35,70 @@ def get_scoring_config() -> Dict[str, Any]:
     return _scoring_config
 
 
+def calculate_employee_count_score(employee_count_value: str, scoring_rules: Dict[str, Any]) -> int:
+    """
+    Calculate score for employee count field.
+    
+    Args:
+        employee_count_value: String value from Employee Count field
+        scoring_rules: Scoring configuration rules
+        
+    Returns:
+        Score points (0, 10, or 20)
+    """
+    import re
+    
+    if not employee_count_value or employee_count_value.strip() == "":
+        return scoring_rules["employee_count_scoring"]["blank_value"]
+    
+    # Extract numeric value from string
+    try:
+        # Look for numeric patterns in the string
+        numbers = re.findall(r'\d+', str(employee_count_value))
+        if numbers:
+            count = int(numbers[0])  # Take first number found
+            if 0 <= count <= 20:
+                return scoring_rules["employee_count_scoring"]["range_0_19"]
+            elif count >= 21:
+                return scoring_rules["employee_count_scoring"]["range_21_plus"]
+    except (ValueError, IndexError):
+        pass
+    
+    # If we can't parse a valid number, treat as blank
+    return scoring_rules["employee_count_scoring"]["blank_value"]
+
+
+def calculate_find_contacts_score(find_contacts_value: str, scoring_rules: Dict[str, Any]) -> int:
+    """
+    Calculate score for find contacts field.
+    
+    Args:
+        find_contacts_value: String value from Find Contacts at Company field
+        scoring_rules: Scoring configuration rules
+        
+    Returns:
+        Score points (0 or 10)
+    """
+    import re
+    
+    if not find_contacts_value or find_contacts_value.strip() == "":
+        return scoring_rules["find_contacts_scoring"]["no_contacts"]
+    
+    # Check for "no profile found" or "company not found" patterns
+    if "no profile found" in find_contacts_value.lower() or "company not found" in find_contacts_value.lower():
+        return scoring_rules["find_contacts_scoring"]["no_contacts"]
+    
+    # Look for "Found X People" pattern
+    found_pattern = re.search(r'found\s+(\d+)\s+people', find_contacts_value.lower())
+    if found_pattern:
+        count = int(found_pattern.group(1))
+        if count >= 1:  # Changed from > 1 to >= 1 (1+ people = 10 points)
+            return scoring_rules["find_contacts_scoring"]["found_contacts"]
+    
+    # Default to no contacts if pattern doesn't match
+    return scoring_rules["find_contacts_scoring"]["no_contacts"]
+
+
 def calculate_numerical_score(classification_result: ClassificationResult) -> Dict[str, Any]:
     """
     Calculate numerical score and breakdown from classification result.
@@ -50,7 +114,6 @@ def calculate_numerical_score(classification_result: ClassificationResult) -> Di
     config = get_scoring_config()
     
     scoring_rules = config["scoring_rules"]
-    penalties = config["penalties"]
     field_weights = config["field_weights"]
     
     # Initialize score breakdown
@@ -83,17 +146,7 @@ def calculate_numerical_score(classification_result: ClassificationResult) -> Di
     }
     base_score += quality_score
     
-    # 3. Maintenance & Service Focus (10 points max)
-    maintenance_value = classification_result.mostly_does_maintenance_and_service
-    maintenance_score = scoring_rules["mostly_does_maintenance_and_service"].get(maintenance_value, 0)
-    breakdown["field_scores"]["mostly_does_maintenance_and_service"] = {
-        "value": maintenance_value,
-        "points": maintenance_score,
-        "max_points": field_weights["mostly_does_maintenance_and_service"]
-    }
-    base_score += maintenance_score
-    
-    # 4. Full List of Services Offered (10 points max) - Special categorical scoring
+    # 3. Full List of Services Offered (10 points max) - Special categorical scoring
     services_value = getattr(classification_result, "full_list_of_services_offered", "Not Assessed")
     # The field name in the test data doesn't exactly match the config keys
     # Let's try to find a match by checking if the value contains the key phrases
@@ -112,58 +165,40 @@ def calculate_numerical_score(classification_result: ClassificationResult) -> Di
     }
     base_score += services_score
     
-    # 5-9. Text fields with binary scoring (varies by field: 5-10 points each if not N/A)
-    text_fields = [
-        "has_certifications_and_compliance_standards",
-        "has_multiple_service_territories",
-        "using_competitor_software",
-        "part_of_known_fire_protection_association"
-    ]
+    # Text fields scoring has been removed for simplified scoring
+    # The following fields are no longer scored but remain in output data:
+    # - has_certifications_and_compliance_standards
+    # - has_multiple_service_territories
+    # - using_competitor_software
+    # - part_of_known_fire_protection_association
+    # - mostly_does_maintenance_and_service
     
-    for field_name in text_fields:
-        # Get value from classification result, with fallback for missing fields
-        field_value = getattr(classification_result, field_name, "N/A")
-        
-        # Check if value is N/A (case insensitive)
-        is_na = field_value.upper() == "N/A"
-        
-        if field_name in scoring_rules["text_field_scoring"]:
-            field_config = scoring_rules["text_field_scoring"][field_name]
-            field_score = field_config["na_value"] if is_na else field_config["not_na_value"]
-        else:
-            # Fallback scoring for missing config
-            field_score = 0 if is_na else field_weights.get(field_name, 10)
-        
-        breakdown["field_scores"][field_name] = {
-            "value": field_value,
-            "points": field_score,
-            "max_points": field_weights.get(field_name, 10)
-        }
-        base_score += field_score
+    # 4. Employee Count Scoring (20 points max)
+    employee_count_value = getattr(classification_result, "employee_count", "")
+    employee_count_score = calculate_employee_count_score(employee_count_value, scoring_rules)
+    breakdown["field_scores"]["employee_count"] = {
+        "value": employee_count_value,
+        "points": employee_count_score,
+        "max_points": field_weights.get("employee_count", 20)
+    }
+    base_score += employee_count_score
+    
+    # 5. Find Contacts Scoring (10 points max)
+    find_contacts_value = getattr(classification_result, "find_contacts_at_company", "")
+    find_contacts_score = calculate_find_contacts_score(find_contacts_value, scoring_rules)
+    breakdown["field_scores"]["find_contacts_at_company"] = {
+        "value": find_contacts_value,
+        "points": find_contacts_score,
+        "max_points": field_weights.get("find_contacts_at_company", 10)
+    }
+    base_score += find_contacts_score
     
     breakdown["base_score"] = base_score
     
-    # Apply parent company penalty
-    parent_company_value = classification_result.has_parent_company
-    parent_config = penalties["parent_company"]
+    # No penalties applied in simplified scoring system
+    breakdown["penalties_applied"] = {}
     
-    penalty_applied = 0
-    if parent_company_value.upper() != parent_config["independent_value"]:
-        # Company has parent company - apply penalty
-        penalty_applied = parent_config["penalty_amount"]
-        breakdown["penalties_applied"]["parent_company"] = {
-            "reason": "Has parent company",
-            "value": parent_company_value,
-            "penalty": penalty_applied
-        }
-    else:
-        breakdown["penalties_applied"]["parent_company"] = {
-            "reason": "Independent company",
-            "value": parent_company_value,
-            "penalty": 0
-        }
-    
-    final_score = base_score + penalty_applied
+    final_score = base_score
     breakdown["final_score"] = final_score
     
     return {
@@ -216,10 +251,6 @@ def get_field_score_explanation(field_name: str, field_value: str) -> str:
         max_points = config["field_weights"]["website_quality"]
         return f"'{field_value}' website scores {score} points out of {max_points} possible"
     
-    elif field_name == "mostly_does_maintenance_and_service":
-        score = scoring_rules["mostly_does_maintenance_and_service"].get(field_value, 0)
-        max_points = config["field_weights"]["mostly_does_maintenance_and_service"]
-        return f"Maintenance focus '{field_value}' scores {score} points out of {max_points} possible"
     
     elif field_name == "full_list_of_services_offered":
         # Use the same logic as the scoring function
@@ -234,13 +265,45 @@ def get_field_score_explanation(field_name: str, field_value: str) -> str:
         max_points = config["field_weights"]["full_list_of_services_offered"]
         return f"Services '{field_value}' scores {score} points out of {max_points} possible"
     
-    elif field_name in scoring_rules.get("text_field_scoring", {}):
-        is_na = field_value.upper() == "N/A"
-        field_config = scoring_rules["text_field_scoring"][field_name]
-        score = field_config["na_value"] if is_na else field_config["not_na_value"]
-        max_points = config["field_weights"].get(field_name, 10)
-        status = "no information found" if is_na else "information found"
-        return f"{field_name.replace('_', ' ').title()}: {status} - {score} points out of {max_points} possible"
+    elif field_name in ["has_certifications_and_compliance_standards", "has_multiple_service_territories", 
+                        "using_competitor_software", "part_of_known_fire_protection_association", "has_parent_company",
+                        "mostly_does_maintenance_and_service"]:
+        return f"{field_name.replace('_', ' ').title()}: Field removed from scoring but remains in output data"
+    
+    elif field_name == "employee_count":
+        score = calculate_employee_count_score(field_value, scoring_rules)
+        max_points = config["field_weights"].get("employee_count", 20)
+        if not field_value or field_value.strip() == "":
+            reason = "no employee count provided"
+        else:
+            import re
+            numbers = re.findall(r'\d+', str(field_value))
+            if numbers:
+                count = int(numbers[0])
+                if 0 <= count <= 20:
+                    reason = f"{count} employees (0-20 range)"
+                elif count >= 21:
+                    reason = f"{count} employees (21+ range)"
+            else:
+                reason = "invalid employee count format"
+        return f"Employee Count: {reason} - {score} points out of {max_points} possible"
+    
+    elif field_name == "find_contacts_at_company":
+        score = calculate_find_contacts_score(field_value, scoring_rules)
+        max_points = config["field_weights"].get("find_contacts_at_company", 10)
+        if not field_value or field_value.strip() == "":
+            reason = "no contact information"
+        elif "no profile found" in field_value.lower() or "company not found" in field_value.lower():
+            reason = "no profiles found"
+        else:
+            import re
+            found_pattern = re.search(r'found\s+(\d+)\s+people', field_value.lower())
+            if found_pattern:
+                count = int(found_pattern.group(1))
+                reason = f"found {count} contact{'s' if count != 1 else ''} (1+ contacts = 10 points)"
+            else:
+                reason = "contact search performed but unclear results"
+        return f"Find Contacts: {reason} - {score} points out of {max_points} possible"
     
     else:
         return f"Unknown field: {field_name}"
@@ -257,15 +320,14 @@ def validate_scoring_config() -> bool:
         config = get_scoring_config()
         
         # Check required sections exist
-        required_sections = ["field_weights", "scoring_rules", "penalties", "validation"]
+        required_sections = ["field_weights", "scoring_rules", "validation"]
         for section in required_sections:
             if section not in config:
                 return False
         
-        # Check that field weights sum to expected total (100 before penalties)
+        # Check that field weights sum to expected total (100 points)
         weights = config["field_weights"]
-        # Exclude parent_company from total since it has 0 weight (penalty-only)
-        total_weight = sum(value for key, value in weights.items() if key != "has_parent_company")
+        total_weight = sum(weights.values())
         
         if total_weight != 100:
             return False

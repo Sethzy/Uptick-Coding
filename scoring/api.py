@@ -326,15 +326,9 @@ def score_domain(
                     record_id=record_id,
                 )
                 
-                # Calculate numerical score
-                try:
-                    scoring_result = calculate_numerical_score(classification_result)
-                    classification_result.final_score = scoring_result["final_score"]
-                    classification_result.score_breakdown = scoring_result["score_breakdown"]
-                    log_info(f"  🔢 Numerical score: {scoring_result['final_score']}")
-                except Exception as e:
-                    log_error(f"  ⚠️  Failed to calculate numerical score: {e}")
-                    # Continue without numerical score
+                # Numerical scoring will be done later with HubSpot data
+                classification_result.final_score = None
+                classification_result.score_breakdown = None
                 
                 return classification_result
             except httpx.HTTPStatusError as e:
@@ -439,9 +433,38 @@ def score_raw_crawler_file(
                 "full_list_of_services_offered": classification_result.full_list_of_services_offered,
                 "using_competitor_software": classification_result.using_competitor_software,
                 "part_of_known_fire_protection_association": classification_result.part_of_known_fire_protection_association,
-                "final_score": classification_result.final_score,
-                "score_breakdown": classification_result.score_breakdown,
             })
+            
+            # Now calculate numerical score with full HubSpot data available
+            try:
+                # Create classification result with HubSpot data for scoring
+                scoring_classification_result = ClassificationResult(
+                    domain=classification_result.domain,
+                    classification_category=classification_result.classification_category,
+                    rationale=classification_result.rationale,
+                    website_quality=classification_result.website_quality,
+                    mostly_does_maintenance_and_service=classification_result.mostly_does_maintenance_and_service,
+                    has_certifications_and_compliance_standards=classification_result.has_certifications_and_compliance_standards,
+                    has_multiple_service_territories=classification_result.has_multiple_service_territories,
+                    has_parent_company=classification_result.has_parent_company,
+                    full_list_of_services_offered=classification_result.full_list_of_services_offered,
+                    using_competitor_software=classification_result.using_competitor_software,
+                    part_of_known_fire_protection_association=classification_result.part_of_known_fire_protection_association,
+                    record_id=classification_result.record_id,
+                    # Add HubSpot fields needed for scoring
+                    employee_count=result.get("Employee Count", ""),
+                    find_contacts_at_company=result.get("Find Contacts at Company", ""),
+                )
+                
+                scoring_result = calculate_numerical_score(scoring_classification_result)
+                result["final_score"] = scoring_result["final_score"]
+                result["score_breakdown"] = scoring_result["score_breakdown"]
+                log_info(f"  🔢 Numerical score: {scoring_result['final_score']}")
+            except Exception as e:
+                log_error(f"  ⚠️  Failed to calculate numerical score: {e}")
+                result["final_score"] = None
+                result["score_breakdown"] = None
+                
             results.append(result)
             
         except Exception as e:

@@ -49,6 +49,9 @@ class ClassificationResult(BaseModel):
     using_competitor_software: Optional[str] = "N/A"
     part_of_known_fire_protection_association: Optional[str] = "N/A"
     record_id: Optional[str] = None
+    # HubSpot fields needed for numerical scoring
+    employee_count: Optional[str] = ""
+    find_contacts_at_company: Optional[str] = ""
     # Numerical scoring fields
     final_score: Optional[int] = None
     score_breakdown: Optional[Dict[str, Any]] = None
