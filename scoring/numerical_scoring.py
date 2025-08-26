@@ -171,25 +171,34 @@ def calculate_numerical_score(classification_result: ClassificationResult) -> Di
     # - has_multiple_service_territories
     # - using_competitor_software
     # - part_of_known_fire_protection_association
-    # - mostly_does_maintenance_and_service
     
-    # 4. Employee Count Scoring (20 points max)
+    # 4. Mostly Does Maintenance and Service (10 points max)
+    maintenance_value = getattr(classification_result, "mostly_does_maintenance_and_service", "")
+    maintenance_score = scoring_rules["mostly_does_maintenance_and_service"].get(maintenance_value.lower(), 0)
+    breakdown["field_scores"]["mostly_does_maintenance_and_service"] = {
+        "value": maintenance_value,
+        "points": maintenance_score,
+        "max_points": field_weights["mostly_does_maintenance_and_service"]
+    }
+    base_score += maintenance_score
+    
+    # 5. Employee Count Scoring (10 points max)
     employee_count_value = getattr(classification_result, "employee_count", "")
     employee_count_score = calculate_employee_count_score(employee_count_value, scoring_rules)
     breakdown["field_scores"]["employee_count"] = {
         "value": employee_count_value,
         "points": employee_count_score,
-        "max_points": field_weights.get("employee_count", 20)
+        "max_points": field_weights["employee_count"]
     }
     base_score += employee_count_score
     
-    # 5. Find Contacts Scoring (10 points max)
+    # 6. Find Contacts Scoring (10 points max)
     find_contacts_value = getattr(classification_result, "find_contacts_at_company", "")
     find_contacts_score = calculate_find_contacts_score(find_contacts_value, scoring_rules)
     breakdown["field_scores"]["find_contacts_at_company"] = {
         "value": find_contacts_value,
         "points": find_contacts_score,
-        "max_points": field_weights.get("find_contacts_at_company", 10)
+        "max_points": field_weights["find_contacts_at_company"]
     }
     base_score += find_contacts_score
     
@@ -221,7 +230,7 @@ def apply_scoring_to_result(classification_result: ClassificationResult) -> Dict
     scoring_result = calculate_numerical_score(classification_result)
     
     # Convert classification result to dict and add scoring fields
-    result_dict = classification_result.dict()
+    result_dict = classification_result.model_dump()
     result_dict.update(scoring_result)
     
     return result_dict
@@ -265,9 +274,13 @@ def get_field_score_explanation(field_name: str, field_value: str) -> str:
         max_points = config["field_weights"]["full_list_of_services_offered"]
         return f"Services '{field_value}' scores {score} points out of {max_points} possible"
     
+    elif field_name == "mostly_does_maintenance_and_service":
+        score = scoring_rules["mostly_does_maintenance_and_service"].get(field_value.lower(), 0)
+        max_points = config["field_weights"]["mostly_does_maintenance_and_service"]
+        return f"Maintenance & Service Focus: '{field_value}' scores {score} points out of {max_points} possible"
+    
     elif field_name in ["has_certifications_and_compliance_standards", "has_multiple_service_territories", 
-                        "using_competitor_software", "part_of_known_fire_protection_association", "has_parent_company",
-                        "mostly_does_maintenance_and_service"]:
+                        "using_competitor_software", "part_of_known_fire_protection_association", "has_parent_company"]:
         return f"{field_name.replace('_', ' ').title()}: Field removed from scoring but remains in output data"
     
     elif field_name == "employee_count":
@@ -330,7 +343,18 @@ def validate_scoring_config() -> bool:
         total_weight = sum(weights.values())
         
         if total_weight != 100:
-            return False
+            raise ValueError(f"Field weights must sum to exactly 100 points, got {total_weight}")
+        
+        # Check required fields exist
+        required_fields = [
+            "classification_category", "website_quality", "full_list_of_services_offered",
+            "employee_count", "find_contacts_at_company", "mostly_does_maintenance_and_service"
+        ]
+        for field in required_fields:
+            if field not in weights:
+                raise ValueError(f"Required field '{field}' missing from field_weights")
+            if field not in config["scoring_rules"]:
+                raise ValueError(f"Required field '{field}' missing from scoring_rules")
         
         return True
         

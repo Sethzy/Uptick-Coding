@@ -138,6 +138,25 @@ domain, context...   Company info...  Merged    LLM Scoring  Final Output
                      State, Industry   Data      + Results    + All Fields
 ```
 
+## Scoring System (100-Point Scale)
+
+The scoring system evaluates companies on 6 key dimensions:
+
+| Field | Points | Description |
+|-------|--------|-------------|
+| **Classification Category** | 50 | Core business model (Maintenance & Service Only: 50pts, 50/50 Split: 40pts, Install Only: 10pts) |
+| **Website Quality** | 10 | Professional appearance and completeness |
+| **Services Offered** | 10 | Fire protection focus vs diversification |
+| **Maintenance Focus** | 10 | Whether company primarily does ongoing service (yes: 10pts, no: 0pts) |
+| **Employee Count** | 10 | Company size indicator (21+: 10pts, 1-20: 5pts, unknown: 0pts) |
+| **Contact Discovery** | 10 | Available decision makers (found contacts: 10pts, none: 0pts) |
+| **TOTAL** | **100** | Maximum possible score |
+
+### Key Scoring Changes (2025-01-23)
+- Added **Maintenance Focus** field (10 points) - helps identify service-oriented companies
+- Reduced Employee Count from 20→10 points to maintain 100-point total
+- Removed backward compatibility - all scoring now uses the updated 6-field system
+
 ## Why Enrichment is Important
 
 **Enrichment provides crucial business context that significantly improves classification accuracy:**

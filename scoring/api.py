@@ -77,7 +77,8 @@ def _build_prompt(aggregated_context: str) -> dict:
         "   - RULE: If website mentions BOTH installations AND maintenance/service, classify here\n"
         "\n"
         "4. OTHER:\n"
-        "   - All services provided are not directly related to fire protection (i.e. marketing company)\n"
+        "   - All services provided are not directly related to fire protection. Take note of fire departments. even if it's a fire department that does some fire extinguisher inspections, fire departments must strictly always be classified as Other. (i.e. marketing company)\n"
+
         "\n"
         "5. NOT CLASSIFIABLE:\n"
         "   - Use when website data is insufficient or contains no useful business information\n"
@@ -125,17 +126,22 @@ def _build_prompt(aggregated_context: str) -> dict:
         "   Examples: Pye Barker, API Group, Summit Companies, Sciens Building Solutions, Cintas, Guardian Fire Protection, Hiller Fire, Impact Fire, Fortis Fire & Safety, Zeus Fire & Security\n"
         "   Output: Provide a short answer detailing what was found. If nothing was found, output N/A.\n"
         "\n"
-        "6. Full list of services offered:\n"
+        "6. Service classification category:\n"
+        "   Question: What is the primary business focus of this company's services?\n"
+        "   Look for: All mentioned services, both fire protection related and other business services\n"
+        "   Output: Must output exactly ONE of these 3 categories:\n"
+        "   - Fire Protection Only\n"
+        "   - Fire Protection and Other Services\n"
+        "   - Other Services Only\n"
+        "\n"
+        "7. Detailed list of services offered:\n"
         "   Question: What specific services does this company offer?\n"
         "   Look for: All mentioned services, both fire protection related and other business services\n"
-        "   Output: Always output one of these 3 categories with the specific services listed:\n"
-        "   - Fire Protection Only - [list fire protection services]\n"
-        "   - Fire Protection and Other Services - [list fire protection services], [list other services]\n"
-        "   - Other Services Only - [list other services]\n"
+        "   Output: Comprehensive list of all services mentioned on the website\n"
         "   Examples:\n"
-        "   - Fire Protection Only - Fire alarm system installation, Fire sprinkler maintenance, Emergency lighting\n"
-        "   - Fire and Other Services - Fire alarm installation, HVAC services, Plumbing, Electrical work\n"
-        "   - Other Services Only - HVAC services, Plumbing, Electrical work, General contracting\n"
+        "   - Fire alarm system installation, Fire sprinkler maintenance, Emergency lighting\n"
+        "   - Fire alarm installation, HVAC services, Plumbing, Electrical work\n"
+        "   - HVAC services, Plumbing, Electrical work, General contracting\n"
         "\n"
         "Schema:\n"
         "{\n"
@@ -146,7 +152,8 @@ def _build_prompt(aggregated_context: str) -> dict:
         "  \"has_certifications_and_compliance_standards\": \"short answer or N/A\",\n"
         "  \"has_multiple_service_territories\": \"short answer or N/A\",\n"
         "  \"has_parent_company\": \"short answer or N/A\",\n"
-        "  \"full_list_of_services_offered\": \"comprehensive list of services or N/A\"\n"
+        "  \"services_category\": \"Fire Protection Only|Fire Protection and Other Services|Other Services Only\",\n"
+        "  \"services_detailed_list\": \"comprehensive list of services or N/A\"\n"
         "}\n"
         "Rules:\n"
         "- Temperature: 0. Output JSON only.\n"
@@ -311,6 +318,10 @@ def score_domain(
                     part_of_known_fire_protection_association = "N/A"
                 
                 # Create base classification result
+                # Map new services_category to the existing full_list_of_services_offered field for scoring
+                services_category = obj.get("services_category", "Not Assessed")
+                services_detailed_list = obj.get("services_detailed_list", "Not Assessed")
+                
                 classification_result = ClassificationResult(
                     domain=domain,
                     classification_category=obj.get("classification_category", "Other"),
@@ -320,7 +331,8 @@ def score_domain(
                     has_certifications_and_compliance_standards=obj.get("has_certifications_and_compliance_standards", "Not Assessed"),
                     has_multiple_service_territories=obj.get("has_multiple_service_territories", "Not Assessed"),
                     has_parent_company=obj.get("has_parent_company", "Not Assessed"),
-                    full_list_of_services_offered=obj.get("full_list_of_services_offered", "Not Assessed"),
+                    full_list_of_services_offered=services_category,  # Use category for scoring
+                    services_detailed_list=services_detailed_list,  # Store detailed list separately
                     using_competitor_software=using_competitor_software,
                     part_of_known_fire_protection_association=part_of_known_fire_protection_association,
                     record_id=record_id,
@@ -419,7 +431,7 @@ def score_raw_crawler_file(
             )
             
             # Create result preserving ALL original fields plus classification
-            result = record.dict() if hasattr(record, 'dict') else dict(record)
+            result = record.model_dump() if hasattr(record, 'model_dump') else dict(record)
             
             # Add classification results
             result.update({
@@ -431,6 +443,7 @@ def score_raw_crawler_file(
                 "has_multiple_service_territories": classification_result.has_multiple_service_territories,
                 "has_parent_company": classification_result.has_parent_company,
                 "full_list_of_services_offered": classification_result.full_list_of_services_offered,
+                "services_detailed_list": classification_result.services_detailed_list,  # Add detailed services
                 "using_competitor_software": classification_result.using_competitor_software,
                 "part_of_known_fire_protection_association": classification_result.part_of_known_fire_protection_association,
             })
@@ -448,6 +461,7 @@ def score_raw_crawler_file(
                     has_multiple_service_territories=classification_result.has_multiple_service_territories,
                     has_parent_company=classification_result.has_parent_company,
                     full_list_of_services_offered=classification_result.full_list_of_services_offered,
+                    services_detailed_list=classification_result.services_detailed_list,
                     using_competitor_software=classification_result.using_competitor_software,
                     part_of_known_fire_protection_association=classification_result.part_of_known_fire_protection_association,
                     record_id=classification_result.record_id,

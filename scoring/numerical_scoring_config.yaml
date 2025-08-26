@@ -4,21 +4,21 @@
 
 # Field weights and maximum points
 field_weights:
-  classification_category: 50
+  classification_category: 40
   website_quality: 10
-  full_list_of_services_offered: 10
+  full_list_of_services_offered: 20
   employee_count: 20
   find_contacts_at_company: 10
-  # Total: 50+10+10+20+10 = 100 points max (before penalties)
+  # Total: 40+10+20+20+10 = 100 points max (before Install Only cap)
 
 # Scoring rules for each field
 scoring_rules:
-  # Classification Category (50 points max)
+  # Classification Category (40 points max)
   classification_category:
-    "Maintenance & Service Only": 50 # Most valuable - stable recurring revenue
+    "Maintenance & Service Only": 40 # Most valuable - stable recurring revenue
     "50/50 Split": 30 # Diversified revenue streams
-    "Install Only": 10 # Project-based, cyclical business
-    "Other": -10 # Specialized expertise, niche market
+    "Install Only": 0 # Project-based, cyclical business (capped at 50 total)
+    "Other": 0 # Specialized expertise, niche market
     "Not Classifiable": 0 # Unknown business model, high risk
 
   # Website Quality (10 points max)
@@ -27,40 +27,41 @@ scoring_rules:
     "Average": 5 # Moderate investment, basic digital maturity
     "Poor": 0 # Low investment, potential resource constraints
 
-
   # Binary scoring for text fields - REMOVED for simplified scoring
   # The following fields are no longer scored but remain in output data:
   # - has_certifications_and_compliance_standards
-  # - has_multiple_service_territories  
+  # - has_multiple_service_territories
   # - using_competitor_software
   # - part_of_known_fire_protection_association
 
-  # Full List of Services Offered (10 points max)
+  # Full List of Services Offered (20 points max)
   full_list_of_services_offered:
-    "Fire Protection Only": 10 # Focused expertise, specialized market
-    "Fire Protection and Other Services": 5 # Diversified but fire-focused
-    "Other Services Only": -10 # Not primarily fire protection, penalty applied
-    # Note: Negative score for "Other Services Only" can result in total scores below 0
+    "Fire Protection Only": 20 # Focused expertise, specialized market
+    "Fire Protection and Other Services": 10 # Diversified but fire-focused
+    "Other Services Only": 0 # Not primarily fire protection, no penalty
 
   # Employee Count Scoring (20 points max)
   employee_count_scoring:
-    blank_value: 0      # Blank/empty/no people found = 0 points
-    range_0_19: 10      # 0-20 employees = 10 points  
-    range_21_plus: 20   # 21+ employees = 20 points
+    blank_value: 0 # Blank/empty/no people found = 0 points
+    range_0_10: 0 # 0-10 employees = 0 points
+    range_11_50: 10 # 11-50 employees = 10 points
+    range_51_plus: 20 # 51+ employees = 20 points
 
-  # Find Contacts Scoring (10 points max)
+  # Find Contacts Scoring (10 points max) - Tiered system
   find_contacts_scoring:
-    no_contacts: 0      # Blank/"no profile found"/"company not found" = 0 points
-    found_contacts: 10  # "Found X People" where X >= 1 = 10 points
+    no_contacts: 0 # Blank/"no profile found"/"company not found" = 0 points
+    one_contact: 5 # "Found 1 People" = 5 points
+    multiple_contacts: 10 # "Found 2+ People" = 10 points
 
 # Penalty system - REMOVED for simplified scoring
 # The parent company penalty has been removed to focus on core business metrics
 
 # Score validation
 validation:
-  min_score: -10 # Minimum possible score (only "Other Services Only" penalty: -10)
+  min_score: 0 # Minimum possible score (no penalties)
   max_score: 100 # Maximum possible score
-  base_max_score: 100 # Maximum before penalties applied
+  base_max_score: 100 # Maximum before Install Only cap applied
+  install_only_cap: 50 # Install Only firms capped at 50 points regardless of raw score
 
 # Field mapping for missing fields in data models
 # This section maps the actual field names used in code to config keys
@@ -71,11 +72,10 @@ field_mapping:
   full_list_of_services_offered: "full_list_of_services_offered"
   employee_count: "employee_count"
   find_contacts_at_company: "find_contacts_at_company"
-  
+
   # Fields removed from scoring but kept in output data:
   # - has_certifications_and_compliance_standards
   # - has_multiple_service_territories
   # - has_parent_company
   # - using_competitor_software
   # - part_of_known_fire_protection_association
-  # - mostly_does_maintenance_and_service
