@@ -1,4 +1,27 @@
 # Ignore environment files
 .env
 
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+venv/
+
+# Node/local dependencies
+node_modules/
+
+# OS/editor noise
+.DS_Store
+.cursor/
+
+# Runtime crawl state and large generated outputs
+.crawl-checkpoint.json
+crawler/.crawl-checkpoint.json
+crawler/.batch_progress
+crawler/batch_log.txt
+crawl-runs/
+crawls-backwards/
+old-crawler-runs/
+
+# Keep only intentional sample outputs when explicitly added
 
