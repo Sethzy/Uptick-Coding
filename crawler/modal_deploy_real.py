@@ -32,13 +32,18 @@ image = (
     )
     # Mount the local crawler code
     .add_local_dir(
-        local_path=".",
+        local_path="crawler",
         remote_path="/root/crawler"
     )
     # Mount the CSV file
     .add_local_file(
-        local_path="../uptick-csvs/filtered-records.csv",
+        local_path="uptick-csvs/enriched-hutbpot-tam-v2.csv",
         remote_path="/root/filtered_records.csv"
+    )
+    # Mount the config file
+    .add_local_file(
+        local_path="crawler/config.json",
+        remote_path="/root/config.json"
     )
 )
 
@@ -51,6 +56,7 @@ image = (
 )
 def crawl_domains(
     total_domains: int = 1000,
+    from_index: int = 0,
     domain_column: str = "Company Domain Name",
     id_column: str = "Record ID"
 ):
@@ -89,11 +95,11 @@ def crawl_domains(
         
         # Build the command line arguments for the crawler
         cmd = [
-            "python", "run_crawl.py",
+            "python", "/root/crawler/run_crawl.py",
             "--input-csv", "/root/filtered_records.csv",
             "--output-jsonl", temp_output_file,
             "--limit", str(total_domains),
-            "--from-index", "0",
+            "--from-index", str(from_index),
             "--column", domain_column,
             "--id-column", id_column,
             "--concurrency", "50",  # 50 concurrent domains
@@ -102,13 +108,32 @@ def crawl_domains(
         
         print(f"🔍 Executing crawler with command: {' '.join(cmd)}")
         
-        # Run the crawler as a subprocess
-        result = subprocess.run(
+        # Run the crawler as a subprocess with real-time output
+        print(f"🔍 Starting crawler subprocess...")
+        process = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            cwd="/root/crawler"
+            cwd="/root",  # Run from root directory
+            bufsize=1,
+            universal_newlines=True
         )
+        
+        # Stream output in real-time
+        print(f"📊 Crawler output stream:")
+        print("=" * 50)
+        for line in process.stdout:
+            print(f"🔄 {line.rstrip()}")
+        
+        # Wait for completion
+        result = subprocess.CompletedProcess(
+            args=cmd,
+            returncode=process.wait(),
+            stdout="",  # Already printed
+            stderr=""
+        )
+        print("=" * 50)
         
         print(f"✅ Crawl completed with return code: {result.returncode}")
         if result.stdout:
@@ -169,6 +194,7 @@ def crawl_domains(
 @app.local_entrypoint()
 def main(
     total_domains: int = 1000,
+    from_index: int = 0,
     domain_column: str = "Company Domain Name",
     id_column: str = "Record ID"
 ):
@@ -182,6 +208,7 @@ def main(
     # Run the crawler function
     result = crawl_domains.remote(
         total_domains=total_domains,
+        from_index=from_index,
         domain_column=domain_column,
         id_column=id_column
     )

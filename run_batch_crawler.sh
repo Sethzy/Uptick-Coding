@@ -8,12 +8,12 @@
 set -e  # Exit on any error
 
 # Configuration
-TOTAL_DOMAINS=10097  # Actual number of domains in enriched-hubspot-TAM-08-25.csv
+TOTAL_DOMAINS=10097  # Actual number of domains in enriched-hutbpot-tam-v2.csv
 BATCH_SIZE=1000
 TOTAL_BATCHES=$((TOTAL_DOMAINS / BATCH_SIZE))
 PROGRESS_FILE="crawler/.batch_progress"  # Save in crawler directory
 LOG_FILE="crawler/batch_log.txt"         # Log file for tracking
-CSV_FILE="uptick-csvs/enriched-hubspot-TAM-08-25.csv"
+CSV_FILE="uptick-csvs/enriched-hutbpot-tam-v2.csv"
 
 # Colors for output
 RED='\033[0;31m'
@@ -34,17 +34,17 @@ show_help() {
     echo "  ./run_batches.sh --log             # Show recent batch logs"
     echo ""
     echo "Batch breakdown (using 3-container concurrent execution):"
-    echo "  Batch 1: domains 0-999 (3 containers × 333 domains each)"
-    echo "  Batch 2: domains 1000-1999 (3 containers × 333 domains each)"
-    echo "  Batch 3: domains 2000-2999 (3 containers × 333 domains each)"
-    echo "  Batch 4: domains 3000-3999 (3 containers × 333 domains each)"
-    echo "  Batch 5: domains 4000-4999 (3 containers × 333 domains each)"
-    echo "  Batch 6: domains 5000-5999 (3 containers × 333 domains each)"
-    echo "  Batch 7: domains 6000-6999 (3 containers × 333 domains each)"
-    echo "  Batch 8: domains 7000-7999 (3 containers × 333 domains each)"
-    echo "  Batch 9: domains 8000-8999 (3 containers × 333 domains each)"
-    echo "  Batch 10: domains 9000-9999 (3 containers × 333 domains each)"
-    echo "  Batch 11: domains 10000-10096 (3 containers × 32-33 domains each)"
+    echo "  Batch 1: domains 0-999 (from-index 0)"
+    echo "  Batch 2: domains 1000-1999 (from-index 1000)"
+    echo "  Batch 3: domains 2000-2999 (from-index 2000)"
+    echo "  Batch 4: domains 3000-3999 (from-index 3000)"
+    echo "  Batch 5: domains 4000-4999 (from-index 4000)"
+    echo "  Batch 6: domains 5000-5999 (from-index 5000)"
+    echo "  Batch 7: domains 6000-6999 (from-index 6000)"
+    echo "  Batch 8: domains 7000-7999 (from-index 7000)"
+    echo "  Batch 9: domains 8000-8999 (from-index 8000)"
+    echo "  Batch 10: domains 9000-9999 (from-index 9000)"
+    echo "  Batch 11: domains 10000-10096 (from-index 10000)"
     echo ""
     echo "🚀 Performance: 3x faster completion with 3 containers running in parallel"
     echo "💰 Cost: 49% savings compared to single large container"
@@ -192,7 +192,7 @@ run_batch() {
     echo "⏰ Started at: $(date)"
     echo -e "${GREEN}🚀 Using 3-container concurrent execution${NC}"
     echo "💻 Each container: 1 CPU + 2GB RAM"
-    echo "⚡ Expected completion: ~${BATCH_SIZE} seconds (vs ~${BATCH_SIZE * 3} seconds with 1 container)"
+    echo "⚡ Expected completion: ~${BATCH_SIZE} seconds (vs ~$((BATCH_SIZE * 3)) seconds with 1 container)"
     
     # Check if Modal is available
     if ! command -v modal &> /dev/null; then
@@ -203,12 +203,22 @@ run_batch() {
     
     log_batch_event "STARTED" $batch_num "Domains $start_index-$end_index (3-container concurrent)"
     
-    # Run the concurrent crawler for this batch
-    echo "🚀 Running: modal run crawler/modal_deploy_real.py --total-domains ${BATCH_SIZE}"
-    modal_output=$(modal run crawler/modal_deploy_real.py --total-domains ${BATCH_SIZE} 2>&1)
+    # Calculate the starting index for this batch
+    local from_index=$(((batch_num - 1) * BATCH_SIZE))
     
-    # Show the output for debugging
-    echo "$modal_output"
+    # Run the concurrent crawler for this batch with real-time output
+    echo "🚀 Running: modal run crawler/modal_deploy_real.py --total-domains ${BATCH_SIZE} --from-index ${from_index}"
+    echo "📊 Real-time crawler output:"
+    echo "=================================="
+    
+    # Run modal with real-time output streaming
+    modal run crawler/modal_deploy_real.py --total-domains ${BATCH_SIZE} --from-index ${from_index} 2>&1 | tee /tmp/modal_output_${batch_num}.log
+    
+    # Capture the output for parsing
+    modal_output=$(cat /tmp/modal_output_${batch_num}.log)
+    
+    echo "=================================="
+    echo "📋 Crawler execution completed"
     
     # Extract session ID and rows count from Modal output
     local session_id="batch_${batch_num}_$(date +%Y%m%d_%H%M%S)"

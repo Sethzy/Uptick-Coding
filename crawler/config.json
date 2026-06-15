@@ -1,6 +1,6 @@
 {
   "csv_input": {
-    "default_file": "../uptick-csvs/filtered-records.csv",
+    "default_file": "/root/filtered_records.csv",
     "domain_column": "Company Domain Name",
     "id_column": "Record ID"
   },
