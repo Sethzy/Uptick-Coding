@@ -61,7 +61,7 @@ validation:
   min_score: 0 # Minimum possible score (no penalties)
   max_score: 100 # Maximum possible score
   base_max_score: 100 # Maximum before Install Only cap applied
-  install_only_cap: 50 # Install Only firms capped at 50 points regardless of raw score
+  install_only_cap: 40 # Install Only firms capped at 40 points regardless of raw score
 
 # Field mapping for missing fields in data models
 # This section maps the actual field names used in code to config keys
