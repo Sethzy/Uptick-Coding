@@ -58,6 +58,8 @@ Add CCUNDO to claude:
 - Claude code shows you how full your context window is
 - Run `/compact` to clear the claude code context window, but keep a summary
 - `/clear` removes all context window and resets the general claude.md rules
+- `/export` lets you copy the history of the chat to clipboard
+- `/resume` lets you go back to an old chat
 
 ### File References
 
@@ -68,8 +70,6 @@ Add CCUNDO to claude:
 
 - Type in claude to start
 - Use kimi 2 using export
-- `/export` lets you copy the history of the chat to clipboard
-- `/resume` lets you go back to an old chat
 - `#` lets you hard code memories
 
 ## Terminal Commands
