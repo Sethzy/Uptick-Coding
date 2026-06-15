@@ -20,8 +20,8 @@ crawler/.crawl-checkpoint.json
 crawler/.batch_progress
 crawler/batch_log.txt
 crawl-runs/
+crawls-sample/
 crawls-backwards/
 old-crawler-runs/
 
 # Keep only intentional sample outputs when explicitly added
-
